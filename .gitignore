@@ -34,4 +34,3 @@ venv/
 
 # Local tooling
 .claude/
-.coverage
