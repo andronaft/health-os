@@ -10,7 +10,7 @@ mcp config pointing to this command.
 """
 from __future__ import annotations
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
 from mcp_server import tools, write_tools
@@ -18,20 +18,20 @@ from prompts.system_prompt import SYSTEM_PROMPT
 
 # Server instructions: MCP clients that support them put the safety rules into the model's
 # context. The same text is also exposed as the `health_assistant` prompt below.
-mcp = FastMCP("health-os", instructions=SYSTEM_PROMPT)
+mcp = MCPServer("health-os", instructions=SYSTEM_PROMPT)
 
 # Tool annotations let clients auto-allow reads and ask the user before writes. Approving a
 # staged panel turns unverified values into facts — marked destructive so clients confirm it.
-READ = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
-WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False,
-                        openWorldHint=False)
-WRITE_IDEMPOTENT = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True,
-                                   openWorldHint=False)
-STAGE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False,
-                        openWorldHint=True)  # may send a critical-value alert (Telegram)
+READ = ToolAnnotations(read_only_hint=True, open_world_hint=False)
+WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False,
+                        open_world_hint=False)
+WRITE_IDEMPOTENT = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True,
+                                   open_world_hint=False)
+STAGE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False,
+                        open_world_hint=True)  # may send a critical-value alert (Telegram)
 APPROVE = ToolAnnotations(title="Approve a staged lab panel (confirm with the user)",
-                          readOnlyHint=False, destructiveHint=True, idempotentHint=True,
-                          openWorldHint=False)
+                          read_only_hint=False, destructive_hint=True, idempotent_hint=True,
+                          open_world_hint=False)
 
 # Compact DDL excerpt of the approved views to hint the model in sql_query.
 _SCHEMA_HINT = """

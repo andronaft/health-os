@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ## [Unreleased]
 
+### Changed
+- Migrated to the MCP Python SDK 2.x (`FastMCP` → `MCPServer`); requires `mcp>=2.2,<3`.
+
 ### Added
 - MCP server instructions: the safety rules (`prompts/system_prompt.py`) are sent to every client
   on connect and exposed as the `health_assistant` prompt.

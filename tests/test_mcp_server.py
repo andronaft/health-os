@@ -53,10 +53,10 @@ def test_medication_safety_detects_biotin_from_meds():
 def test_every_tool_is_annotated_for_client_permissions():
     tools = {t.name: t.annotations for t in asyncio.run(mcp.list_tools())}
     assert all(a is not None for a in tools.values())
-    writes = {n for n, a in tools.items() if not a.readOnlyHint}
+    writes = {n for n, a in tools.items() if not a.read_only_hint}
     assert writes == {"set_profile", "record_allergy", "record_diagnosis", "record_medication",
                       "log_meal", "save_meal_template", "log_from_template", "stage_lab_panel",
                       "approve_staged_source"}
     # approving turns unverified values into facts → clients should always confirm
-    assert tools["approve_staged_source"].destructiveHint is True
-    assert tools["crisis_resources"].readOnlyHint and tools["sql_query"].readOnlyHint
+    assert tools["approve_staged_source"].destructive_hint is True
+    assert tools["crisis_resources"].read_only_hint and tools["sql_query"].read_only_hint
