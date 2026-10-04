@@ -442,6 +442,20 @@ def sql_query(sql: str) -> str:
         return json.dumps({"error": str(e)})
 
 
+
+def _fts_or_query(q: str) -> str | None:
+    """Build a Postgres tsquery OR string from free text.
+
+    Tokens may keep inner apostrophes (don't, ім'я) but leading/trailing
+    apostrophes are stripped so to_tsquery('simple', ...) never sees a
+    token that starts with a quote (syntax error).
+    """
+    import re
+    tokens = [t.strip("'") for t in re.findall(r"[\w']+", q.lower(), flags=re.UNICODE)]
+    tokens = [t for t in tokens if t]
+    return " | ".join(tokens) if tokens else None
+
+
 def search(query: str, limit: int = 8, days: int = 0) -> str:
     """Hybrid search over document narrative chunks (Phase 3): local embeddings
     (cosine, semantics) + full-text tsvector (keyword). Scores are normalized and
@@ -449,13 +463,11 @@ def search(query: str, limit: int = 8, days: int = 0) -> str:
     Results are marked UNTRUSTED (plan 4.7): document content is data, not instructions.
     days>0 → only chunks with an effective_date within the last N days.
     """
-    import re
     limit = max(1, min(limit, 25))
     q = (query or "").strip()
     if not q:
         return json.dumps({"error": "empty query"})
-    tokens = re.findall(r"[\w']+", q.lower(), flags=re.UNICODE)
-    orq = " | ".join(tokens) if tokens else None
+    orq = _fts_or_query(q)
     dfv = "AND (c.effective_date IS NULL OR c.effective_date >= now()::date - :d)" if days > 0 else ""
 
     qv = None
