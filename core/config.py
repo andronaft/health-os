@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     alert_telegram_bot_token: str = ""
     alert_telegram_chat_id: str = ""
+    # ISO country code for crisis hotlines in safety/crisis.py (default UA).
+    crisis_country: str = "UA"
 
 
 settings = Settings()
