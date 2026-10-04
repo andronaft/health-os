@@ -45,3 +45,10 @@ def test_unit_gate_unknown_unit_blocked(conn):
 def test_identity_when_already_canonical(conn):
     nr = normalize("глюкоза", 5.2, "mmol/L", conn)
     assert nr.value_canonical == 5.2
+
+def test_es_de_pl_lab_synonyms_canonicalize():
+    from core.normalize import canonicalize
+    # Spanish / German / Polish printed names for common markers
+    assert canonicalize("Colesterol total") is not None
+    assert canonicalize("Glucosa") is not None
+    assert canonicalize("Hemoglobina") is not None
