@@ -29,7 +29,7 @@ schedules are deterministic code, not LLM judgement.
   age-gated risk calculators, a screening calendar, a weekly report, a doctor-visit brief.
 - **Food log** — meals with a 41-nutrient profile, %RDA, deficiency/excess flags, meal templates.
 - **Devices** — Apple Health export and Garmin import.
-- **28 MCP tools + server instructions** — the safety rules are sent to every client on connect;
+- **29 MCP tools + server instructions** — the safety rules are sent to every client on connect;
   see [mcp_server/README.md](mcp_server/README.md).
 
 ## Try it in one command
@@ -72,6 +72,9 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/alembic upgrade head        # schema
 .venv/bin/python -m seed.load         # marker catalog, synonyms, units, nutrients
 .venv/bin/python -m seed.demo         # optional: a fictional demo patient to play with
+
+# or, one command after docker is available:
+make demo                              # db up + migrations + catalog + demo patient
 ```
 
 Then connect an MCP client — config for LM Studio, Open WebUI, Ollama CLI and Claude is in

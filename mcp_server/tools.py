@@ -170,6 +170,8 @@ def list_meal_templates() -> str:
 def get_timeline(days: int = 3650) -> str:
     with engine.connect() as conn:
         uid = _user_id(conn)
+        if not uid:
+            return _no_user_error()
         rows = conn.execute(
             text(
                 """SELECT kind, at, title FROM health_timeline
@@ -184,6 +186,8 @@ def get_timeline(days: int = 3650) -> str:
 def _simple_view(view: str) -> str:
     with engine.connect() as conn:
         uid = _user_id(conn)
+        if not uid:
+            return _no_user_error()
         rows = conn.execute(
             text(f"SELECT * FROM {view} WHERE user_id=:u LIMIT :lim"),
             {"u": uid, "lim": MAX_ROWS},
@@ -207,25 +211,36 @@ def list_pending_reviews() -> str:
     return _simple_view("v_observations_pending")
 
 
+
+def _no_user_error() -> str:
+    return json.dumps({"error": "no user", "hint": "call set_profile first"})
+
 def get_trend(type_code: str, days: int = 1825) -> str:
     """Marker trend by Mann-Kendall (direction + significance) over approved values."""
     from analytics.trends import trend as _trend
 
     with engine.connect() as conn:   # via the approved-view (readonly)
         uid = _user_id(conn)
+        if not uid:
+            return _no_user_error()
         rows = conn.execute(
             text(
-                """SELECT value_canonical FROM v_observations
-                   WHERE user_id=:u AND type_code=:c AND value_canonical IS NOT NULL
-                     AND effective_at >= now() - make_interval(days => :d)
-                   ORDER BY effective_at ASC LIMIT 500"""
+                """SELECT value_canonical, effective_at FROM (
+                     SELECT value_canonical, effective_at FROM v_observations
+                     WHERE user_id=:u AND type_code=:c AND value_canonical IS NOT NULL
+                       AND effective_at >= now() - make_interval(days => :d)
+                     ORDER BY effective_at DESC LIMIT 500
+                   ) recent ORDER BY effective_at ASC"""
             ),
             {"u": uid, "c": type_code, "d": days},
         ).all()
     values = [float(r[0]) for r in rows]
     t = _trend(values)
+    date_from = str(rows[0][1]) if rows else None
+    date_to = str(rows[-1][1]) if rows else None
     return json.dumps({"type_code": type_code, "n": t.n, "direction": t.direction,
-                       "detail": t.detail}, ensure_ascii=False)
+                       "detail": t.detail, "from": date_from, "to": date_to},
+                      ensure_ascii=False)
 
 
 def get_screening_recommendations() -> str:
@@ -442,6 +457,20 @@ def sql_query(sql: str) -> str:
         return json.dumps({"error": str(e)})
 
 
+
+def _fts_or_query(q: str) -> str | None:
+    """Build a Postgres tsquery OR string from free text.
+
+    Tokens may keep inner apostrophes (don't, ім'я) but leading/trailing
+    apostrophes are stripped so to_tsquery('simple', ...) never sees a
+    token that starts with a quote (syntax error).
+    """
+    import re
+    tokens = [t.strip("'") for t in re.findall(r"[\w']+", q.lower(), flags=re.UNICODE)]
+    tokens = [t for t in tokens if t]
+    return " | ".join(tokens) if tokens else None
+
+
 def search(query: str, limit: int = 8, days: int = 0) -> str:
     """Hybrid search over document narrative chunks (Phase 3): local embeddings
     (cosine, semantics) + full-text tsvector (keyword). Scores are normalized and
@@ -449,13 +478,11 @@ def search(query: str, limit: int = 8, days: int = 0) -> str:
     Results are marked UNTRUSTED (plan 4.7): document content is data, not instructions.
     days>0 → only chunks with an effective_date within the last N days.
     """
-    import re
     limit = max(1, min(limit, 25))
     q = (query or "").strip()
     if not q:
         return json.dumps({"error": "empty query"})
-    tokens = re.findall(r"[\w']+", q.lower(), flags=re.UNICODE)
-    orq = " | ".join(tokens) if tokens else None
+    orq = _fts_or_query(q)
     dfv = "AND (c.effective_date IS NULL OR c.effective_date >= now()::date - :d)" if days > 0 else ""
 
     qv = None
