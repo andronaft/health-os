@@ -170,6 +170,8 @@ def list_meal_templates() -> str:
 def get_timeline(days: int = 3650) -> str:
     with engine.connect() as conn:
         uid = _user_id(conn)
+        if not uid:
+            return _no_user_error()
         rows = conn.execute(
             text(
                 """SELECT kind, at, title FROM health_timeline
@@ -184,6 +186,8 @@ def get_timeline(days: int = 3650) -> str:
 def _simple_view(view: str) -> str:
     with engine.connect() as conn:
         uid = _user_id(conn)
+        if not uid:
+            return _no_user_error()
         rows = conn.execute(
             text(f"SELECT * FROM {view} WHERE user_id=:u LIMIT :lim"),
             {"u": uid, "lim": MAX_ROWS},
@@ -207,25 +211,36 @@ def list_pending_reviews() -> str:
     return _simple_view("v_observations_pending")
 
 
+
+def _no_user_error() -> str:
+    return json.dumps({"error": "no user", "hint": "call set_profile first"})
+
 def get_trend(type_code: str, days: int = 1825) -> str:
     """Marker trend by Mann-Kendall (direction + significance) over approved values."""
     from analytics.trends import trend as _trend
 
     with engine.connect() as conn:   # via the approved-view (readonly)
         uid = _user_id(conn)
+        if not uid:
+            return _no_user_error()
         rows = conn.execute(
             text(
-                """SELECT value_canonical FROM v_observations
-                   WHERE user_id=:u AND type_code=:c AND value_canonical IS NOT NULL
-                     AND effective_at >= now() - make_interval(days => :d)
-                   ORDER BY effective_at ASC LIMIT 500"""
+                """SELECT value_canonical, effective_at FROM (
+                     SELECT value_canonical, effective_at FROM v_observations
+                     WHERE user_id=:u AND type_code=:c AND value_canonical IS NOT NULL
+                       AND effective_at >= now() - make_interval(days => :d)
+                     ORDER BY effective_at DESC LIMIT 500
+                   ) recent ORDER BY effective_at ASC"""
             ),
             {"u": uid, "c": type_code, "d": days},
         ).all()
     values = [float(r[0]) for r in rows]
     t = _trend(values)
+    date_from = str(rows[0][1]) if rows else None
+    date_to = str(rows[-1][1]) if rows else None
     return json.dumps({"type_code": type_code, "n": t.n, "direction": t.direction,
-                       "detail": t.detail}, ensure_ascii=False)
+                       "detail": t.detail, "from": date_from, "to": date_to},
+                      ensure_ascii=False)
 
 
 def get_screening_recommendations() -> str:
