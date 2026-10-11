@@ -523,6 +523,12 @@ def approve_staged(conn, user_id: str, source_id: str, *,
     Numeric rows without a canonical value (unit gate failed) would drop out of trends and
     analytics for good (#11), so they block the approval unless explicitly allowed.
     """
+    src = conn.execute(
+        text("SELECT id FROM ingestion_sources WHERE id=:sid AND user_id=:u"),
+        {"sid": source_id, "u": user_id},
+    ).first()
+    if not src:
+        return {"error": "source not found", "source_id": source_id}
     missing = conn.execute(
         text(
             """SELECT ot.code, o.value_numeric, o.unit
@@ -558,11 +564,12 @@ def approve_staged(conn, user_id: str, source_id: str, *,
         ),
         {"sid": source_id, "u": user_id},
     ).all()
-    conn.execute(
-        text("UPDATE ingestion_sources SET review_status='approved', reviewed_by='human', "
-             "reviewed_at=now() WHERE id=:sid AND user_id=:u"),
-        {"sid": source_id, "u": user_id},
-    )
+    if not unmapped:
+        conn.execute(
+            text("UPDATE ingestion_sources SET review_status='approved', reviewed_by='human', "
+                 "reviewed_at=now() WHERE id=:sid AND user_id=:u"),
+            {"sid": source_id, "u": user_id},
+        )
     out = {"approved_observations": n, "source_id": source_id}
     if missing:
         out["approved_without_canonical"] = len(missing)

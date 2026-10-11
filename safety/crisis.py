@@ -37,20 +37,64 @@ def is_crisis(text: str | None) -> bool:
     return any(rx.search(n) for rx in _COMPILED)
 
 
-def crisis_response(emergency_contact: str | None = None) -> str:
+# Per-country crisis lines (no network, no model). 112 is the European emergency
+# number and is kept as a fallback for every EU/EEA country listed here.
+# Sources: Lifeline UA 7333 (lifeline.org.ua); emergency 103 (UA) / 112 (EU);
+# 988 Suicide & Crisis Lifeline (988lifeline.org); 116 123 Samaritans (UK/IE);
+# 0800 111 0 111 Telefonseelsorge (DE); 116 123 (PL — NFZ whisper line).
+_HOTLINES = {
+    "UA": {
+        "label": "Lifeline Ukraine — 7333 (free, 24/7, confidential)",
+        "emergency": "103 or 112",
+    },
+    "ES": {
+        "label": "Línea 024 de atención a la conducta suicida — 024 (24/7)",
+        "emergency": "112",
+    },
+    "US": {
+        "label": "988 Suicide & Crisis Lifeline — call or text 988 (24/7)",
+        "emergency": "911",
+    },
+    "GB": {
+        "label": "Samaritans — 116 123 (free, 24/7)",
+        "emergency": "999",
+    },
+    "UK": {
+        "label": "Samaritans — 116 123 (free, 24/7)",
+        "emergency": "999",
+    },
+    "DE": {
+        "label": "Telefonseelsorge — 0800 111 0 111 or 0800 111 0 222 (24/7)",
+        "emergency": "112",
+    },
+    "PL": {
+        "label": "NFZ whisper line — 116 123 (24/7)",
+        "emergency": "112",
+    },
+}
+
+
+def _country_hotlines(country: str | None = None) -> dict:
+    import os
+    code = (country or os.getenv("CRISIS_COUNTRY", "UA") or "UA").strip().upper()
+    return _HOTLINES.get(code, _HOTLINES["UA"])
+
+
+def crisis_response(emergency_contact: str | None = None, country: str | None = None) -> str:
     """Fixed crisis response. No analytics, no "let's look at your trends"."""
+    hot = _country_hotlines(country)
     lines = [
         "It sounds like things are very hard for you right now. You're not alone — there are "
         "people ready to listen right now.",
         "",
-        "📞 **Lifeline Ukraine — 7333** (free, 24/7, confidential)",
-        "🚨 **Emergency services — 103 or 112**",
+        f"📞 **{hot['label']}**",
+        f"🚨 **Emergency services — {hot['emergency']}**",
     ]
     if emergency_contact:
         lines.append(f"👤 Your trusted contact: {emergency_contact}")
     lines += [
         "",
-        "If there is an immediate threat to life — please call 103/112 right now.",
+        f"If there is an immediate threat to life — please call {hot['emergency']} right now.",
         "I'm not a medical professional and I don't replace crisis care, but I'm here and I "
         "won't leave you.",
     ]

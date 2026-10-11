@@ -14,10 +14,18 @@ def test_non_crisis_is_clean():
     assert not is_crisis(None)
 
 
-def test_response_has_hotlines():
+def test_response_has_hotlines_default_ua():
     r = crisis_response()
     assert "7333" in r
     assert "103" in r and "112" in r
+
+def test_response_hotlines_by_country():
+    us = crisis_response(country="US")
+    assert "988" in us and "911" in us
+    de = crisis_response(country="DE")
+    assert "0800 111 0 111" in de and "112" in de
+    unknown = crisis_response(country="ZZ")
+    assert "7333" in unknown  # falls back to UA
 
 
 def test_response_includes_trusted_contact():
