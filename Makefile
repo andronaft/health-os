@@ -1,7 +1,15 @@
-.PHONY: start stop restart logs test test-unit test-integration lint
+.PHONY: start stop restart logs demo test test-unit test-integration lint
 
 start:
 	@docker compose up -d
+
+# One-command demo database: db up, migrations, catalog seed, fictional patient.
+# seed.demo refuses a non-empty DB — run `make stop` first if you need a clean slate.
+demo:
+	@docker compose up -d db
+	@uv run alembic upgrade head
+	@uv run python -m seed.load
+	@uv run python -m seed.demo
 
 stop:
 	@docker compose down
