@@ -42,6 +42,8 @@ settings.database_url = _TEST_URL_STR
 settings.readonly_database_url = ""  # readonly engine falls back to the test engine
 os.environ["DATABASE_URL"] = _TEST_URL_STR
 os.environ["READONLY_DATABASE_URL"] = ""
+# never message the real Telegram chat from a test run (see _no_real_alerts below)
+settings.alert_telegram_bot_token = settings.alert_telegram_chat_id = ""
 
 from core.db import engine  # noqa: E402 — must be imported after the redirect above
 
@@ -117,6 +119,17 @@ def conn():
 def user_id(conn):
     from core.services import get_or_create_user
     return get_or_create_user(conn)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_alerts(monkeypatch, tmp_path):
+    """Critical values staged by tests (e.g. potassium 6.9 in test_write_flow) go through the
+    real send_critical_alert. Without this they were appended to the install's data/alerts.log
+    and popped a macOS notification on every run — a real alert would drown among them."""
+    from safety import alerts
+    monkeypatch.setattr(alerts, "_LOG", tmp_path / "alerts.log")
+    monkeypatch.setattr(alerts, "_macos_notify", lambda *a: False)
+    monkeypatch.setattr(alerts, "_telegram_send", lambda *a: False)
 
 
 @pytest.fixture(autouse=True)
