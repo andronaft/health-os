@@ -6,8 +6,9 @@ status computation from the form, and the deterministic critical-value rule-engi
 """
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -139,6 +140,101 @@ def add_medication(conn, user_id: str, medication_name: str, *, start_date,
                  sd=start_date, st=status, pf=prescribed_for, sid=sid),
         ).scalar()
     )
+
+
+# fields a correction may touch; status/end_date change only through stop_medication
+MEDICATION_EDITABLE = ("medication_name", "dose_amount", "dose_unit", "route", "times_per_day",
+                       "product_type", "prescribed_for", "atc_code", "start_date")
+
+
+def _as_date(v) -> date:
+    return v if isinstance(v, date) else date.fromisoformat(str(v))
+
+
+def _find_medication(conn, user_id: str, medication_id: str):
+    try:
+        uuid.UUID(str(medication_id))
+    except ValueError:
+        return None
+    return conn.execute(
+        text("""SELECT * FROM medications
+                WHERE id = CAST(:id AS uuid) AND user_id = :u AND deleted_at IS NULL"""),
+        {"id": medication_id, "u": user_id},
+    ).mappings().first()
+
+
+def _set_actor(conn, reason: str) -> None:
+    # read by the medication_history trigger (migration 0012)
+    conn.execute(text("SELECT set_config('app.actor', 'user', true), "
+                      "set_config('app.reason', :r, true)"), {"r": reason})
+
+
+def update_medication(conn, user_id: str, medication_id: str, changes: dict) -> dict:
+    """Correct a recorded medication in place: a typo, a missing dose, unit, frequency or route.
+
+    Only the given fields change (None = keep); the previous row is kept in medication_history.
+    A dose the doctor changed is not a correction — stop the old entry and record a new one,
+    so the timeline shows when the change happened.
+    """
+    unknown = sorted(set(changes) - set(MEDICATION_EDITABLE))
+    if unknown:
+        return {"error": f"can't change {', '.join(unknown)} — editable: "
+                         f"{', '.join(MEDICATION_EDITABLE)}"}
+    changes = {k: v for k, v in changes.items() if v is not None}
+    if not changes:
+        return {"error": "nothing to change — pass at least one field"}
+    row = _find_medication(conn, user_id, medication_id)
+    if row is None:
+        return {"error": "no medication with this id — take it from get_medications"}
+    if "start_date" in changes:
+        try:
+            changes["start_date"] = _as_date(changes["start_date"])
+        except ValueError:
+            return {"error": "start_date must be YYYY-MM-DD"}
+        if row["end_date"] and changes["start_date"] > row["end_date"]:
+            return {"error": f"start_date is after the end_date {row['end_date']}"}
+
+    _set_actor(conn, "update_medication")
+    sets = ", ".join(f"{k} = :{k}" for k in changes)  # keys are whitelisted above
+    conn.execute(text(f"UPDATE medications SET {sets} WHERE id = :id"),
+                 {**changes, "id": row["id"]})
+    return {"id": str(row["id"]),
+            "changed": {k: {"from": row[k], "to": v} for k, v in changes.items()
+                        if row[k] != v}}
+
+
+def stop_medication(conn, user_id: str, medication_id: str, *, end_date,
+                    stop_reason=None, side_effects=None) -> dict:
+    """Mark a medication as no longer taken (status 'stopped' + end_date).
+
+    It leaves v_medications_current (get_medications, the health summary, safety checks) and
+    stays on the timeline as a medication_stop event. The previous row goes to medication_history.
+    """
+    row = _find_medication(conn, user_id, medication_id)
+    if row is None:
+        return {"error": "no medication with this id — take it from get_medications"}
+    if row["status"] != "taking":
+        return {"error": f"already {row['status']}"
+                         + (f" since {row['end_date']}" if row["end_date"] else "")}
+    try:
+        end = _as_date(end_date)
+    except ValueError:
+        return {"error": "end_date must be YYYY-MM-DD"}
+    if end > date.today():
+        return {"error": "end_date is in the future — record the stop when it happens"}
+    if end < row["start_date"]:
+        return {"error": f"end_date is before the start_date {row['start_date']}"}
+
+    _set_actor(conn, "stop_medication")
+    conn.execute(
+        text("""UPDATE medications SET status = 'stopped', end_date = :e,
+                    stop_reason = COALESCE(:r, stop_reason),
+                    side_effects = COALESCE(:se, side_effects)
+                WHERE id = :id"""),
+        {"e": end, "r": stop_reason, "se": side_effects, "id": row["id"]},
+    )
+    return {"id": str(row["id"]), "medication_name": row["medication_name"],
+            "status": "stopped", "start_date": row["start_date"], "end_date": end}
 
 
 # --------------------------------------------------------------------------- food diary
