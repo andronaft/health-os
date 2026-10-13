@@ -29,6 +29,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   stop + new entry, so the timeline shows when. Migration 0012: `medication_history` (trigger
   keeps every previous version of the row, like `observation_history`).
 - `record_medication` takes `route` (oral / topical / …).
+- `update_meal` and `delete_meal` — a logged meal couldn't be corrected: a wrong time, portion or
+  nutrient estimate, or a meal logged twice, needed raw SQL. `update_meal` overwrites only the
+  given fields and nutrient codes; `delete_meal` is a soft delete. `query_food` now returns each
+  meal's `id` for them.
+- `log_meal` / `log_from_template` return the `eaten_at` they stored and a `time_check` note when
+  a main meal's time looks wrong: a lunch at 23:30, or a meal after midnight that may belong to
+  the day before. Daily nutrient totals go by the date, and meals logged late at night with
+  "now" as the time were landing on the wrong day (5 of 45 main meals in real use).
 
 ## [0.2.1] — 2026-10-01
 

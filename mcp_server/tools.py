@@ -121,7 +121,7 @@ def query_food(days: int = 7, meal_type: str = "") -> str:
                 f"{n['amount']} {n['unit']}"
         out = []
         for m in meals:
-            d = {k: v for k, v in dict(m).items() if k != "id"}
+            d = dict(m)  # id is what update_meal / delete_meal take
             d["nutrients"] = by_meal.get(str(m["id"]), {})
             out.append(d)
         return json.dumps({"meals": out}, default=str, ensure_ascii=False)
