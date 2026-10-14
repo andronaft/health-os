@@ -120,7 +120,8 @@ def get_medications() -> str:
     """Medications and supplements the user is currently taking (status "taking"): name, dose,
     unit, times per day, route, product type (prescription / otc / supplement / herbal).
     Use it before any medication question — then call check_medication_safety; never suggest
-    dose changes. To add one use record_medication."""
+    dose changes. To add one use record_medication, to fix an entry update_medication, when
+    the user stopped taking one stop_medication."""
     return tools.get_medications()
 
 
@@ -284,15 +285,47 @@ def record_diagnosis(diagnosis_name: str, diagnosed_at: str, icd10_code: str = "
 def record_medication(medication_name: str, start_date: str, dose_amount: float | None = None,
                       dose_unit: str = "", times_per_day: float | None = None,
                       product_type: str = "prescription", prescribed_for: str = "",
-                      atc_code: str = "") -> str:
+                      atc_code: str = "", route: str = "") -> str:
     """Add a medication or supplement the user currently takes (stored immediately as
-    approved). medication_name: brand or generic; start_date: YYYY-MM-DD; dose_amount + dose_unit
-    (e.g. 1000 + mg) and times_per_day — record these whenever known, check_medication_safety
-    uses them (e.g. total daily paracetamol); product_type: prescription (default) / otc /
-    supplement / herbal; prescribed_for: optional reason; atc_code: optional. Never use this to
-    change a prescribed dose — that is for the doctor."""
+    approved). medication_name: brand or generic, with the strength if it has one (e.g.
+    "Minoxidil 5%"); start_date: YYYY-MM-DD; dose_amount + dose_unit (e.g. 1000 + mg, 1 + ml) and
+    times_per_day — record these whenever known, check_medication_safety uses them (e.g. total
+    daily paracetamol); product_type: prescription (default) / otc / supplement / herbal;
+    prescribed_for: optional reason; atc_code: optional; route: oral / topical / inhaled /
+    injection / … Check get_medications first to avoid duplicates. Never use this to change a
+    prescribed dose — that is for the doctor."""
     return write_tools.record_medication(medication_name, start_date, dose_amount, dose_unit,
-                                         times_per_day, product_type, prescribed_for, atc_code)
+                                         times_per_day, product_type, prescribed_for, atc_code,
+                                         route)
+
+
+@mcp.tool(annotations=WRITE_IDEMPOTENT)
+def update_medication(medication_id: str, medication_name: str = "",
+                      dose_amount: float | None = None, dose_unit: str = "",
+                      times_per_day: float | None = None, route: str = "",
+                      product_type: str = "", prescribed_for: str = "", atc_code: str = "",
+                      start_date: str = "") -> str:
+    """Correct a recorded medication the user says is wrong or incomplete: a typo in the name,
+    a missing or mistyped dose, unit, times_per_day or route, the wrong start date.
+    medication_id comes from get_medications; pass only the fields to change (empty = keep).
+    The previous version is kept in the change history. Not for a dose the doctor changed —
+    then call stop_medication (stop_reason "dose changed") and record_medication with the new
+    dose from that date, so the timeline shows the change. Never suggest dose changes yourself."""
+    return write_tools.update_medication(medication_id, medication_name, dose_amount, dose_unit,
+                                         times_per_day, route, product_type, prescribed_for,
+                                         atc_code, start_date)
+
+
+@mcp.tool(annotations=WRITE_IDEMPOTENT)
+def stop_medication(medication_id: str, end_date: str = "", stop_reason: str = "",
+                    side_effects: str = "") -> str:
+    """Record that the user no longer takes a medication: medication_id from get_medications,
+    end_date YYYY-MM-DD (default today; not in the future), stop_reason and side_effects
+    optional (e.g. "course finished", "doctor stopped it", "dose changed"; "rash"). It drops
+    out of get_medications and the safety checks but stays on the timeline as medication_stop.
+    Only when the user says it was stopped — never suggest stopping a medication. If the side
+    effect sounds like an allergic reaction, offer record_allergy too."""
+    return write_tools.stop_medication(medication_id, end_date, stop_reason, side_effects)
 
 
 @mcp.tool(annotations=WRITE)
