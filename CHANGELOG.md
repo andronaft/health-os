@@ -21,6 +21,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   re-runs the critical-value check and saves the printed name as a learned synonym, so the next
   panel maps it automatically. Migration 0011: `observations.type_id` nullable + `raw_name`;
   unmapped rows can never be approved (`approve_staged_source` leaves them pending).
+- `update_medication` and `stop_medication` — medications could only be added, so a wrong dose
+  or a drug the user no longer takes could be fixed only with raw SQL, and `get_medications`
+  kept listing it. Corrections change only the given fields; a stop sets status `stopped` +
+  `end_date` (not in the future), drops the drug from `get_medications` and the safety checks
+  and adds a `medication_stop` event to the timeline. A dose the doctor changed is recorded as
+  stop + new entry, so the timeline shows when. Migration 0012: `medication_history` (trigger
+  keeps every previous version of the row, like `observation_history`).
+- `record_medication` takes `route` (oral / topical / …).
 
 ## [0.2.1] — 2026-10-01
 

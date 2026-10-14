@@ -8,7 +8,7 @@ SEPARATE explicit action (guardrail: the model must not create+approve in one mo
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import date, datetime
 
 from core.db import engine
 from core.services import (
@@ -24,6 +24,8 @@ from core.services import (
 from core.services import log_from_template as _svc_log_from_template
 from core.services import map_pending_observation as _svc_map_pending
 from core.services import save_meal_template as _svc_save_meal_template
+from core.services import stop_medication as _svc_stop_medication
+from core.services import update_medication as _svc_update_medication
 from safety.alerts import send_critical_alert
 
 
@@ -70,15 +72,45 @@ def record_diagnosis(diagnosis_name: str, diagnosed_at: str, icd10_code: str = "
 def record_medication(medication_name: str, start_date: str, dose_amount: float | None = None,
                       dose_unit: str = "", times_per_day: float | None = None,
                       product_type: str = "prescription", prescribed_for: str = "",
-                      atc_code: str = "") -> str:
+                      atc_code: str = "", route: str = "") -> str:
     """Add current medications/supplements. product_type: prescription/otc/supplement/herbal."""
     with engine.begin() as conn:
         uid = get_or_create_user(conn)
         mid = add_medication(conn, uid, medication_name, start_date=start_date,
                              dose_amount=dose_amount, dose_unit=dose_unit or None,
-                             times_per_day=times_per_day, product_type=product_type,
-                             prescribed_for=prescribed_for or None, atc_code=atc_code or None)
+                             route=route or None, times_per_day=times_per_day,
+                             product_type=product_type, prescribed_for=prescribed_for or None,
+                             atc_code=atc_code or None)
     return _j({"id": mid})
+
+
+def update_medication(medication_id: str, medication_name: str = "",
+                      dose_amount: float | None = None, dose_unit: str = "",
+                      times_per_day: float | None = None, route: str = "",
+                      product_type: str = "", prescribed_for: str = "", atc_code: str = "",
+                      start_date: str = "") -> str:
+    """Correct a recorded medication; empty arguments are left unchanged."""
+    changes = dict(medication_name=medication_name, dose_amount=dose_amount,
+                   dose_unit=dose_unit, times_per_day=times_per_day, route=route,
+                   product_type=product_type, prescribed_for=prescribed_for,
+                   atc_code=atc_code, start_date=start_date)
+    with engine.begin() as conn:
+        uid = get_or_create_user(conn)
+        out = _svc_update_medication(conn, uid, medication_id,
+                                     {k: (None if v == "" else v) for k, v in changes.items()})
+    return _j(out)
+
+
+def stop_medication(medication_id: str, end_date: str = "", stop_reason: str = "",
+                    side_effects: str = "") -> str:
+    """Mark a medication as stopped (end_date defaults to today)."""
+    with engine.begin() as conn:
+        uid = get_or_create_user(conn)
+        out = _svc_stop_medication(conn, uid, medication_id,
+                                   end_date=end_date or date.today().isoformat(),
+                                   stop_reason=stop_reason or None,
+                                   side_effects=side_effects or None)
+    return _j(out)
 
 
 def log_meal(description: str, meal_type: str = "", eaten_at: str = "", portion: str = "",
