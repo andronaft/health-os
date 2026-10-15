@@ -566,6 +566,52 @@ def _get_or_create_facility(conn, user_id: str, name: str | None) -> str | None:
     )
 
 
+def _lab_number(v) -> float | None:
+    """A number from a value or a printed string ("6,4", " 5.4", "−3"); None if it isn't one."""
+    import re
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, int | float):
+        return float(v)
+    s = str(v).strip().replace("\u2212", "-").replace(" ", "")
+    if re.fullmatch(r"[+-]?\d+(?:[.,]\d+)?", s):
+        return float(s.replace(",", "."))
+    return None
+
+
+def _coerce_lab_row(r: dict) -> tuple[dict, str | None]:
+    """Models pass values as printed: "6,4", "negative", "<0.5". A numeric string becomes a
+    number; any other text goes to value_text (a qualitative result or a detection limit) —
+    a string compared with a float used to crash the whole panel, critical rows included."""
+    r = dict(r)
+    note = None
+    v = r.get("value")
+    if isinstance(v, str):
+        num = _lab_number(v)
+        if num is not None:
+            r["value"] = num
+        else:
+            r["value"] = None
+            if v.strip() and not r.get("value_text"):
+                r["value_text"] = v.strip()
+                note = "stored as text, not a number"
+    for k in ("ref_min", "ref_max"):
+        if r.get(k) is not None and not isinstance(r[k], int | float):
+            r[k] = _lab_number(r[k])
+    return r, note
+
+
+def _check_panel_date(panel_date) -> str | None:
+    from datetime import date, timedelta
+    try:
+        d = panel_date if isinstance(panel_date, date) else date.fromisoformat(str(panel_date)[:10])
+    except ValueError:
+        return "panel_date must be YYYY-MM-DD"
+    if d > date.today() + timedelta(days=1):
+        return f"panel_date {d} is in the future — check the year on the report"
+    return None
+
+
 def stage_panel(conn, user_id: str, panel_date, rows: list[dict], *,
                 panel_type: str | None = None, facility: str | None = None,
                 alerter=None) -> dict:
@@ -576,8 +622,13 @@ def stage_panel(conn, user_id: str, panel_date, rows: list[dict], *,
     Returns a staging summary: source_id, panel_id, per-row results, counters,
     a warning about a possible duplicate panel (logical dedup).
     """
+    from sqlalchemy.exc import DBAPIError
+
     from ingestion.confidence import score as _confidence
 
+    date_error = _check_panel_date(panel_date)
+    if date_error:
+        return {"error": date_error}
     facility_id = _get_or_create_facility(conn, user_id, facility)
 
     # logical dedup: same date+facility+≥70% codes → warning (not a block)
@@ -598,6 +649,16 @@ def stage_panel(conn, user_id: str, panel_date, rows: list[dict], *,
     results = []
     n_critical = n_unknown = n_unit_gate = n_crit_unverified = n_wrong_type = 0
     for r in rows:
+        name = str(r.get("raw_name") or "").strip() if isinstance(r, dict) else ""
+        if not name:
+            results.append({"raw_name": None, "stored": False,
+                            "note": "no marker name — not stored"})
+            continue
+        r, coerce_note = _coerce_lab_row({**r, "raw_name": name})
+        if r.get("value") is None and not r.get("value_text"):
+            results.append({"raw_name": name, "value": None, "unit": r.get("unit"),
+                            "stored": False, "note": "no value — not stored"})
+            continue
         row_eff = r.get("effective_at")
         # an observation from a form is dated with the panel date (historical date, day only)
         eff = row_eff or panel_date
@@ -611,12 +672,20 @@ def stage_panel(conn, user_id: str, panel_date, rows: list[dict], *,
                     channel="mcp", review_status="pending", panel_id=panel_id,
                     source_id=source_id, alerter=alerter,
                 )
-        except IntegrityError:
+        except IntegrityError as e:
+            constraint = getattr(getattr(e.orig, "diag", None), "constraint_name", None)
             # the same marker twice in one panel (e.g. fasting + 2 h glucose) — uq_obs_in_panel
-            results.append({"raw_name": r["raw_name"], "value": r.get("value"),
+            note = ("same marker already in this panel — not stored; stage it as a separate "
+                    "panel (e.g. with its own time)" if constraint == "uq_obs_in_panel"
+                    else f"not stored: {constraint or 'integrity error'}")
+            results.append({"raw_name": name, "value": r.get("value"),
+                            "unit": r.get("unit"), "stored": False, "note": note})
+            continue
+        except (TypeError, ValueError, ArithmeticError, DBAPIError) as e:
+            # one malformed row must not lose the panel (and the alerts already sent for it)
+            results.append({"raw_name": name, "value": r.get("value"),
                             "unit": r.get("unit"), "stored": False,
-                            "note": "same marker already in this panel — not stored; stage it as "
-                                    "a separate panel (e.g. with its own time)"})
+                            "note": f"not stored: {type(e).__name__}"})
             continue
         if res.critical:
             n_critical += 1
@@ -643,6 +712,7 @@ def stage_panel(conn, user_id: str, panel_date, rows: list[dict], *,
             **({"rejected_match": res.normalized.type_code}
                if res.normalized.dimension_mismatch else {}),
             "value": r.get("value"),
+            **({"value_text": r["value_text"]} if r.get("value_text") else {}),
             "unit": r.get("unit"),
             "canonical": res.normalized.value_canonical,
             "status": res.status,
@@ -650,7 +720,7 @@ def stage_panel(conn, user_id: str, panel_date, rows: list[dict], *,
             "critical_unverified": res.critical_unverified,
             "confidence": conf.score,
             "confidence_flags": conf.flags,
-            "note": res.note,
+            "note": f"{res.note}; {coerce_note}" if coerce_note else res.note,
         })
 
     hint = ("Review the table. To write to approved — approve_staged(source_id) "
