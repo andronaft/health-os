@@ -36,6 +36,17 @@ def test_medication_safety_sums_paracetamol_from_current_meds():
     assert p["source"] == "current_medications" and "Combination products" in p["note"]
 
 
+def test_medication_safety_flags_current_paracetamol_without_a_dose():
+    # used to be skipped silently (only dose_unit == "mg" was looked at)
+    meds = [{"medication_name": "Paracetamol", "dose_amount": None, "dose_unit": None,
+             "times_per_day": None},
+            {"medication_name": "Парацетамол 1 г", "dose_amount": 1, "dose_unit": "g",
+             "times_per_day": 2}]
+    p = medication_safety(meds)["paracetamol"]
+    assert p["level"] == "incomplete" and p["missing_dose"] == ["Paracetamol"]
+    assert p["total_mg_per_day"] == 2000  # 1 g × 2 counted in mg
+
+
 def test_medication_safety_explicit_products_across_otc():
     products = [{"name": "Paracetamol", "mg_per_dose": 1000, "doses_per_day": 3},
                 {"name": "Cold & flu powder", "mg_per_dose": 500, "doses_per_day": 3}]

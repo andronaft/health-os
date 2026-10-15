@@ -354,6 +354,14 @@ _PARACETAMOL_NAMES = ("paracetamol", "парацетамол", "acetaminophen", 
 _BIOTIN_NAMES = ("biotin", "біотин", "биотин", "vitamin b7", "вітамін b7")
 
 
+def _dose_mg(med: dict):
+    unit = (med.get("dose_unit") or "").strip().lower()
+    amount = med.get("dose_amount")
+    if amount is None or unit not in ("mg", "g"):
+        return None
+    return float(amount) * (1000 if unit == "g" else 1)
+
+
 def medication_safety(current_meds: list[dict], paracetamol_products: list[dict] | None = None,
                       taking_biotin: bool | None = None,
                       planned_tests: list[str] | None = None) -> dict:
@@ -378,16 +386,19 @@ def medication_safety(current_meds: list[dict], paracetamol_products: list[dict]
     source = "provided"
     if paracetamol_products is None:
         source = "current_medications"
+        # a paracetamol entry without a dose in mg is still counted — as "dose unknown",
+        # never silently skipped
         paracetamol_products = [
-            {"name": m["medication_name"], "mg_per_dose": m.get("dose_amount"),
+            {"name": m["medication_name"], "mg_per_dose": _dose_mg(m),
              "doses_per_day": m.get("times_per_day")}
-            for m in current_meds
-            if _has(m, _PARACETAMOL_NAMES) and (m.get("dose_unit") or "").lower() == "mg"
+            for m in current_meds if _has(m, _PARACETAMOL_NAMES)
         ]
     if paracetamol_products:
         load = check_paracetamol_load(paracetamol_products)
         out["paracetamol"] = {"source": source, "total_mg_per_day": round(load.total_mg_per_day),
                               "level": load.level, "message": load.message}
+        if load.missing_dose:
+            out["paracetamol"]["missing_dose"] = load.missing_dose
         if source == "current_medications":
             out["paracetamol"]["note"] = ("Combination products (cold/flu remedies) may contain "
                                           "paracetamol under another name — ask the user and pass "
