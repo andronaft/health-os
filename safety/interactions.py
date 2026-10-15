@@ -10,7 +10,7 @@ computed:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 REFUSAL = (
     "I don't assess drug interactions and don't say whether a specific medication is \"safe to "
@@ -27,8 +27,9 @@ PARACETAMOL_CAUTION_MG = 3000         # caution (long-term use / liver factors)
 class ParacetamolLoad:
     total_mg_per_day: float
     products: list[str]
-    level: str            # ok / caution / exceeded
+    level: str            # ok / caution / exceeded / incomplete
     message: str
+    missing_dose: list[str] = field(default_factory=list)  # products the total couldn't include
 
 
 def refuse_interaction_query() -> str:
@@ -44,16 +45,30 @@ def check_paracetamol_load(products: list[dict]) -> ParacetamolLoad:
     """
     total = 0.0
     names: list[str] = []
+    missing: list[str] = []
     for p in products:
-        mg = float(p.get("mg_per_dose") or 0)
-        n = float(p.get("doses_per_day") or 0)
+        name = p.get("name", "?")
+        names.append(name)
+        mg, n = _positive(p.get("mg_per_dose")), _positive(p.get("doses_per_day"))
+        if mg is None or n is None:
+            # counting it as 0 mg used to report "within limits" — false reassurance
+            missing.append(name)
+            continue
         total += mg * n
-        names.append(p.get("name", "?"))
 
     if total > PARACETAMOL_MAX_DAILY_MG:
         level = "exceeded"
         msg = (f"⚠️ Total paracetamol ~{total:.0f} mg/day exceeds the limit of "
                f"{PARACETAMOL_MAX_DAILY_MG} mg. Risk of liver damage — review with a doctor/pharmacist.")
+        if missing:
+            msg += f" Not counted (dose unknown): {', '.join(missing)}."
+    elif missing:
+        level = "incomplete"
+        msg = (f"Can't confirm the daily paracetamol total: the dose or doses per day is unknown "
+               f"for {', '.join(missing)}. Ask the user for mg per dose and doses per day — "
+               f"4 doses of 1000 mg already reach the {PARACETAMOL_MAX_DAILY_MG} mg limit."
+               + (f" The products with a known dose add up to ~{total:.0f} mg/day." if total
+                  else ""))
     elif total >= PARACETAMOL_CAUTION_MG:
         level = "caution"
         msg = (f"Total paracetamol ~{total:.0f} mg/day is close to the limit of "
@@ -63,7 +78,15 @@ def check_paracetamol_load(products: list[dict]) -> ParacetamolLoad:
         msg = f"Total paracetamol ~{total:.0f} mg/day — within limits."
     if len(names) > 1:
         msg += f" Sources ({len(names)}): {', '.join(names)}."
-    return ParacetamolLoad(total, names, level, msg)
+    return ParacetamolLoad(total, names, level, msg, missing)
+
+
+def _positive(v) -> float | None:
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return x if x > 0 else None
 
 
 # analytes that biotin distorts (immunoassays)
