@@ -1,6 +1,6 @@
 [project]
 name = "health-os"
-version = "0.2.1"
+version = "0.3.0"
 description = "Local-first personal health record exposed over MCP"
 requires-python = ">=3.12"
 license = { text = "AGPL-3.0-or-later" }

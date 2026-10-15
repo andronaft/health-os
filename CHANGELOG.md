@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-15
+
 ### Changed
 - `sql_query` runs only on the restricted read-only login (`READONLY_DATABASE_URL`). On a login
   that can do more (a superuser or the owner of the tables — the default without
@@ -171,7 +173,8 @@ First public release.
 - Postgres and Open WebUI ports bound to `127.0.0.1` by default.
 - Private vulnerability reporting — see [SECURITY.md](SECURITY.md).
 
-[Unreleased]: https://github.com/andronaft/health-os/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/andronaft/health-os/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/andronaft/health-os/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/andronaft/health-os/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/andronaft/health-os/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/andronaft/health-os/releases/tag/v0.1.0
