@@ -51,6 +51,7 @@ Point your MCP client at it:
       "command": "docker",
       "args": ["run", "-i", "--rm", "--network", "health-os-demo",
                "-e", "DATABASE_URL=postgresql+psycopg://health:demo@db:5432/health_os",
+               "-e", "READONLY_DATABASE_URL=postgresql+psycopg://health_readonly:demo_ro@db:5432/health_os",
                "health-os:local"]
     }
   }

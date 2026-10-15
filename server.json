@@ -25,7 +25,7 @@
         },
         {
           "name": "READONLY_DATABASE_URL",
-          "description": "Optional: connection as the health_readonly role for DB-level read isolation.",
+          "description": "Recommended: connection as the restricted health_readonly login (scripts/setup_readonly.py). Gives DB-level read isolation; sql_query runs only with it.",
           "isRequired": false,
           "isSecret": true
         }

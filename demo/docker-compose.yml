@@ -3,7 +3,9 @@
 #   cd demo
 #   docker compose up -d --build     # db + migrations + demo data
 #   docker run -i --rm --network health-os-demo \
-#     -e DATABASE_URL=postgresql+psycopg://health:demo@db:5432/health_os health-os:local
+#     -e DATABASE_URL=postgresql+psycopg://health:demo@db:5432/health_os \
+#     -e READONLY_DATABASE_URL=postgresql+psycopg://health_readonly:demo_ro@db:5432/health_os \
+#     health-os:local
 #                                    # ↑ what your MCP client runs (exits cleanly on disconnect;
 #                                    #   `docker compose run` would leave the container running)
 #   docker compose down -v           # remove everything
@@ -13,6 +15,7 @@
 
 x-app-env: &app-env
   DATABASE_URL: postgresql+psycopg://health:demo@db:5432/health_os
+  READONLY_DB_PASSWORD: demo_ro  # demo-only; the restricted login sql_query requires
 
 services:
   db:
@@ -39,6 +42,7 @@ services:
     # idempotent: re-running `up` keeps the existing demo data
     command: >
       sh -c "alembic upgrade head && python -m seed.load &&
+             python -m scripts.setup_readonly &&
              (python -m seed.demo || echo 'demo data already loaded')"
     restart: "no"
 

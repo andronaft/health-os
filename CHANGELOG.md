@@ -6,6 +6,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ## [Unreleased]
 
+### Changed
+- `sql_query` runs only on the restricted read-only login (`READONLY_DATABASE_URL`). On a login
+  that can do more (a superuser or the owner of the tables — the default without
+  `READONLY_DATABASE_URL`) it returns an error explaining the setup; the other read tools are
+  unaffected. The Docker demo now sets up and uses the restricted login.
+
 ### Fixed
 - Lab rows with a name missing from the catalog were dropped by `stage_lab_panel` (only a note
   in the response). They are now stored as pending **unmapped** rows (printed name, value, unit,
@@ -15,6 +21,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   10^9/L but mapped to the % type) used to take that marker's slot in the panel, so the correct
   row was rejected as a duplicate. When the unit's dimension can't belong to the matched marker
   the row is now stored unmapped, with a "likely wrong type" note instead of "no unit conversion".
+- `stage_lab_panel` crashed on a value passed as printed — `"6,4"`, `"negative"`, `"<0.5"` — and
+  lost the whole panel, critical rows included. Numeric strings are now read as numbers, other
+  text is stored as `value_text`, and every row is isolated: a row that still fails is reported
+  and the rest is kept. A row without a value says "no value" (it was reported as a duplicate),
+  and `panel_date` must be a valid date that isn't in the future (#41).
+- `check_medication_safety` counted a paracetamol product with no known dose as 0 mg and answered
+  "within limits"; a current paracetamol entry without a dose in mg was skipped. An unknown dose
+  is now reported as `incomplete`, asking for mg per dose and doses per day (#43).
+- `get_trend` / `query_observations`: a code with no values at all (`"LDL"`, a typo) looked like
+  "no data for this marker". Codes are lower-cased, and an empty result says which case it is,
+  with `did_you_mean` codes. Very large `days` windows no longer crash six read tools, and
+  panels without a type are titled "lab panel" in the timeline (#44).
+- `get_trend` used the oldest 500 values instead of the most recent (#24); `search` failed on
+  tokens with leading/trailing apostrophes (#23); read tools returned empty lists instead of a
+  "no user" error before a profile exists (#25); `approve_staged_source` reported success for an
+  unknown `source_id` (#26).
+- The test suite fired real critical alerts (alerts log, macOS notification, Telegram) on the
+  maintainer's machine; tests now never reach the real channels (#40).
 
 ### Added
 - `map_pending_observation(observation_id, type_code)` — assigns the type, re-normalizes the value,

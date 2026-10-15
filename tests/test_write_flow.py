@@ -12,6 +12,15 @@ from mcp_server import tools, write_tools
 pytestmark = pytest.mark.integration  # hits the DB via `engine` / MCP tools directly
 
 
+@pytest.fixture(autouse=True)
+def _restricted_sql_login(monkeypatch):
+    # the test DB login is a superuser; these tests exercise the layers below sql_query's login
+    # check (read-only transaction, view-only role) — the check itself: test_sql_query_login.py
+    # still a real query on sql_query's connection, so the transaction flow is exercised
+    monkeypatch.setattr(tools, "_login_can_leave_readonly",
+                        lambda conn: conn.execute(text("SELECT false")).scalar())
+
+
 def _cleanup(source_id, panel_id):
     with engine.begin() as conn:
         conn.execute(

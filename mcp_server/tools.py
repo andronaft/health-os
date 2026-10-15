@@ -476,8 +476,27 @@ def crisis_resources(message: str = "") -> str:
     }, ensure_ascii=False)
 
 
+_RESTRICTED_LOGIN_REQUIRED = (
+    "sql_query needs the restricted read-only database login: set READONLY_DATABASE_URL "
+    "(mcp_server/README.md → \"Setting up the readonly role\"). The other read tools work "
+    "without it.")
+
+
+def _login_can_leave_readonly(conn) -> bool:
+    """True when the database login can act as more than health_readonly: a superuser, or a
+    role that can read the base tables (e.g. their owner). Model-written SQL runs only on a
+    login that can't — SET LOCAL ROLE alone is not a boundary for such a login."""
+    return bool(conn.execute(text(
+        """SELECT EXISTS (
+             SELECT 1 FROM pg_roles r
+             WHERE pg_has_role(session_user, r.oid, 'MEMBER')
+               AND (r.rolsuper OR has_table_privilege(r.oid, 'public.observations', 'SELECT')))"""
+    )).scalar())
+
+
 def sql_query(sql: str) -> str:
-    """Arbitrary SELECT over approved-views. Read-only + timeout 5s. Only SELECT/WITH."""
+    """Arbitrary SELECT over approved-views. Read-only + timeout 5s. Only SELECT/WITH.
+    Runs only on the restricted read-only login (READONLY_DATABASE_URL)."""
     s = sql.strip().rstrip(";")
     low = s.lower()
     if not (low.startswith("select") or low.startswith("with")):
@@ -489,10 +508,11 @@ def sql_query(sql: str) -> str:
     try:
         with engine.connect() as conn:
             trans = conn.begin()
-            conn.execute(text("SET TRANSACTION READ ONLY"))
-            # Always drop to the view-only role — also when READONLY_DATABASE_URL is not set and
-            # we are connected as the owner (a superuser in the Docker image). Fails closed: if
-            # the role can't be assumed, the query is not run.
+            conn.execute(text("SET TRANSACTION READ ONLY"))  # must come before any query
+            if _login_can_leave_readonly(conn):
+                trans.rollback()
+                return json.dumps({"error": _RESTRICTED_LOGIN_REQUIRED})
+            # also drop to the view-only role explicitly; fails closed if it can't be assumed
             conn.execute(text("SET LOCAL ROLE health_readonly"))
             conn.execute(text("SET LOCAL statement_timeout = '5s'"))
             rows = conn.execute(text(s)).mappings().all()

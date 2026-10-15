@@ -123,5 +123,6 @@ Recommended client setup: allow read tools automatically, **always ask** before
 .venv/bin/alembic upgrade head
 .venv/bin/python -m scripts.setup_readonly   # enables LOGIN + password
 ```
-If it is not configured, reads go through the main connection (protection stays at the code
-level: read-only tx in sql_query), but without DB-level isolation.
+Without it the read tools go through the main connection (the approved views still filter what
+they return), and `sql_query`, which runs SQL written by the model, refuses to run: it needs a
+login that can't act as more than `health_readonly`.
