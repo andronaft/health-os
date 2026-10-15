@@ -20,6 +20,28 @@ from core.health_summary import build
 
 MAX_ROWS = 200
 AGG_THRESHOLD_DAYS = 90
+MAX_DAYS = 36500  # 100 years is "all time"; far larger windows overflow make_interval in Postgres
+
+
+def _days(days) -> int:
+    return max(0, min(int(days), MAX_DAYS))
+
+
+def _no_values_note(conn, uid, type_code: str) -> dict:
+    """An empty result for a code the user has no values for at all ("LDL", "cholesterol") read
+    exactly like "no data for this marker". Say which it is and offer the closest codes that do
+    have approved values."""
+    import difflib
+    codes = [r[0] for r in conn.execute(
+        text("SELECT DISTINCT type_code FROM v_observations WHERE user_id=:u"), {"u": uid})]
+    if type_code in codes:
+        return {"note": f"no approved values for “{type_code}” in this period"}
+    close = difflib.get_close_matches(type_code, codes, n=5, cutoff=0.5)
+    close += [c for c in codes if type_code and type_code in c and c not in close]
+    out = {"note": f"“{type_code}” has no approved values at all — check the type_code"}
+    if close:
+        out["did_you_mean"] = close[:5]
+    return out
 
 
 def _user_id(conn) -> str | None:
@@ -42,6 +64,7 @@ def get_health_summary() -> str:
 
 def query_observations(type_code: str, days: int = 365) -> str:
     """Values of a marker over a period. >90 days → weekly aggregation (min/avg/max)."""
+    type_code, days = (type_code or "").strip().lower(), _days(days)
     with engine.connect() as conn:
         uid = _user_id(conn)
         if not uid:
@@ -63,9 +86,11 @@ def query_observations(type_code: str, days: int = 365) -> str:
                 ),
                 {"u": uid, "c": type_code, "d": days, "lim": MAX_ROWS},
             ).mappings().all()
-            return json.dumps({"type_code": type_code, "aggregation": "weekly",
-                               "buckets": [dict(r) for r in rows]}, default=str,
-                              ensure_ascii=False)
+            out = {"type_code": type_code, "aggregation": "weekly",
+                   "buckets": [dict(r) for r in rows]}
+            if not rows:
+                out.update(_no_values_note(conn, uid, type_code))
+            return json.dumps(out, default=str, ensure_ascii=False)
         rows = conn.execute(
             text(
                 """
@@ -78,13 +103,16 @@ def query_observations(type_code: str, days: int = 365) -> str:
             ),
             {"u": uid, "c": type_code, "d": days, "lim": MAX_ROWS},
         ).mappings().all()
-        return json.dumps({"type_code": type_code, "rows": [dict(r) for r in rows]},
-                          default=str, ensure_ascii=False)
+        out = {"type_code": type_code, "rows": [dict(r) for r in rows]}
+        if not rows:
+            out.update(_no_values_note(conn, uid, type_code))
+        return json.dumps(out, default=str, ensure_ascii=False)
 
 
 def query_food(days: int = 7, meal_type: str = "") -> str:
     """Food log over N days: meals (with gi/gl/wellbeing) + nutrients per meal.
     Optional meal_type filter (breakfast/lunch/dinner/snack/drink)."""
+    days = _days(days)
     with engine.connect() as conn:
         uid = _user_id(conn)
         if not uid:
@@ -132,6 +160,7 @@ def query_nutrition(days: int = 7) -> str:
     deficient (<70% of norm) / excess (>safe upper limit). For tracking vitamins/minerals,
     sodium, sugar, saturated fats, etc. Same numbers as nutrition_report (one implementation)."""
     from analytics.nutrition import summarize
+    days = _days(days)
     with engine.connect() as conn:
         uid = _user_id(conn)
         if not uid:
@@ -144,6 +173,7 @@ def query_nutrition(days: int = 7) -> str:
 def nutrition_report(days: int = 30) -> str:
     """"Healthiness" over N days: deficiencies/excesses (%RDA + flags) + food's link to wellbeing."""
     from analytics.nutrition import summarize
+    days = _days(days)
     with engine.connect() as conn:
         uid = _user_id(conn)
         if not uid:
@@ -168,13 +198,17 @@ def list_meal_templates() -> str:
 
 
 def get_timeline(days: int = 3650) -> str:
+    days = _days(days)
     with engine.connect() as conn:
         uid = _user_id(conn)
         if not uid:
             return _no_user_error()
         rows = conn.execute(
             text(
-                """SELECT kind, at, title FROM health_timeline
+                """SELECT kind, at,
+                          COALESCE(title, CASE kind WHEN 'panel' THEN 'lab panel' ELSE kind END)
+                          AS title
+                   FROM health_timeline
                    WHERE user_id=:u AND at >= now() - make_interval(days => :d)
                    ORDER BY at DESC LIMIT :lim"""
             ),
@@ -219,6 +253,7 @@ def get_trend(type_code: str, days: int = 1825) -> str:
     """Marker trend by Mann-Kendall (direction + significance) over approved values."""
     from analytics.trends import trend as _trend
 
+    type_code, days = (type_code or "").strip().lower(), _days(days)
     with engine.connect() as conn:   # via the approved-view (readonly)
         uid = _user_id(conn)
         if not uid:
@@ -234,12 +269,13 @@ def get_trend(type_code: str, days: int = 1825) -> str:
             ),
             {"u": uid, "c": type_code, "d": days},
         ).all()
+        missing = _no_values_note(conn, uid, type_code) if not rows else {}
     values = [float(r[0]) for r in rows]
     t = _trend(values)
     date_from = str(rows[0][1]) if rows else None
     date_to = str(rows[-1][1]) if rows else None
     return json.dumps({"type_code": type_code, "n": t.n, "direction": t.direction,
-                       "detail": t.detail, "from": date_from, "to": date_to},
+                       "detail": t.detail, "from": date_from, "to": date_to, **missing},
                       ensure_ascii=False)
 
 
@@ -490,6 +526,7 @@ def search(query: str, limit: int = 8, days: int = 0) -> str:
     days>0 → only chunks with an effective_date within the last N days.
     """
     limit = max(1, min(limit, 25))
+    days = _days(days)
     q = (query or "").strip()
     if not q:
         return json.dumps({"error": "empty query"})
