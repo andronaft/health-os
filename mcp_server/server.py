@@ -28,6 +28,8 @@ WRITE_IDEMPOTENT = ToolAnnotations(read_only_hint=False, destructive_hint=False,
                                    open_world_hint=False)
 STAGE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False,
                         open_world_hint=True)  # may send a critical-value alert (Telegram)
+DELETE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True,
+                        open_world_hint=False)
 APPROVE = ToolAnnotations(title="Approve a staged lab panel (confirm with the user)",
                           read_only_hint=False, destructive_hint=True, idempotent_hint=True,
                           open_world_hint=False)
@@ -81,8 +83,8 @@ def get_timeline(days: int = 3650) -> str:
 
 @mcp.tool(annotations=READ)
 def query_food(days: int = 7, meal_type: str = "") -> str:
-    """Food diary entries for the last N days, newest first (max 200 meals): time, meal type,
-    description, portion, glycemic index/load, symptoms and wellbeing after eating, plus the
+    """Food diary entries for the last N days, newest first (max 200 meals): id (for
+    update_meal / delete_meal), time, meal type, description, portion, glycemic index/load, symptoms and wellbeing after eating, plus the
     nutrients stored for each meal. Use it to see WHAT was eaten. For daily totals vs norms use
     query_nutrition; for deficiencies and food↔wellbeing patterns use nutrition_report.
     days: look-back window (default 7). meal_type: optional filter —
@@ -340,7 +342,10 @@ def log_meal(description: str, meal_type: str = "", eaten_at: str = "", portion:
     vitamin_c/vitamin_d/vitamin_b12/folate_b9/water/caffeine/alcohol/...). added_sugar —
     sugar ADDED to the dish (not natural from fruit/milk). The full-profile estimate is made by
     the model (including from a photo). glycemic_index/glycemic_load — per meal; symptoms/wellbeing —
-    reaction after eating. Review — query_food; daily norms — query_nutrition."""
+    reaction after eating. Daily totals go by the date of eaten_at: when the user logs a meal
+    later (e.g. lunch in the evening, yesterday's dinner after midnight), pass when it was
+    eaten, not now; a time_check in the response means the time looks wrong — confirm it with
+    the user. Review — query_food; daily norms — query_nutrition."""
     return write_tools.log_meal(description, meal_type, eaten_at, portion, nutrients,
                                 glycemic_index, glycemic_load, symptoms, wellbeing,
                                 nutrient_source, notes)
@@ -355,6 +360,29 @@ def save_meal_template(name: str, meal_type: str = "", description: str = "",
     {nutrient_code: amount} for ONE portion, same codes as log_meal (energy_kcal, protein, fiber,
     sodium, vitamin_c, …); glycemic_index: optional. See list_meal_templates for existing ones."""
     return write_tools.save_meal_template(name, meal_type, description, nutrients, glycemic_index)
+
+
+@mcp.tool(annotations=WRITE_IDEMPOTENT)
+def update_meal(food_log_id: str, eaten_at: str = "", meal_type: str = "",
+                description: str = "", portion: str = "", nutrients: dict | None = None,
+                glycemic_index: int | None = None, glycemic_load: float | None = None,
+                symptoms: str = "", wellbeing: str = "", notes: str = "") -> str:
+    """Correct a logged meal: food_log_id from query_food; pass only what to change (empty =
+    keep). eaten_at 'YYYY-MM-DD HH:MM' moves it to the right day (daily totals go by its date);
+    nutrients {code: amount} overwrites just those codes, the rest of the profile stays — e.g.
+    the user ate half: pass the halved amounts. To remove a meal logged by mistake or twice
+    use delete_meal."""
+    return write_tools.update_meal(food_log_id, eaten_at, meal_type, description, portion,
+                                   nutrients, glycemic_index, glycemic_load, symptoms,
+                                   wellbeing, notes)
+
+
+@mcp.tool(annotations=DELETE)
+def delete_meal(food_log_id: str) -> str:
+    """Remove a meal from the food diary and the nutrient totals — only when the user says it
+    was logged by mistake or twice (food_log_id from query_food). To fix a time, portion or
+    nutrients use update_meal instead."""
+    return write_tools.delete_meal(food_log_id)
 
 
 @mcp.tool(annotations=WRITE)

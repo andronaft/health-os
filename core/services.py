@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -267,6 +267,17 @@ def add_food_log(conn, user_id: str, description: str, *, eaten_at, meal_type=No
         ).scalar()
     )
 
+    saved, unknown = _save_nutrients(conn, food_id, nutrients)
+    out = {"id": food_id, "nutrients_saved": saved, "unknown_codes": unknown,
+           "eaten_at": eaten_at}
+    note = meal_time_note(eaten_at, meal_type)
+    if note:
+        out["time_check"] = note
+    return out
+
+
+def _save_nutrients(conn, food_id, nutrients: dict | None) -> tuple[int, list[str]]:
+    """Upsert {code: amount} for one meal; unknown codes are returned, never invented."""
     saved, unknown = 0, []
     if nutrients:
         id_map = {c: nid for nid, c in
@@ -287,8 +298,92 @@ def add_food_log(conn, user_id: str, description: str, *, eaten_at, meal_type=No
                 {"f": food_id, "nid": nid, "a": amount},
             )
             saved += 1
+    return saved, unknown
 
-    return {"id": food_id, "nutrients_saved": saved, "unknown_codes": unknown}
+
+# hours a main meal usually falls in; end is exclusive, dinner runs past midnight
+_MEAL_HOURS = {"breakfast": (4, 13), "lunch": (10, 19), "dinner": (16, 28)}
+
+
+def meal_time_note(eaten_at, meal_type) -> str | None:
+    """A deterministic check of a main meal's time — daily nutrient totals go by its date.
+
+    Meals logged late at night with "now" as the time land on the wrong day (a lunch at 23:30,
+    yesterday's dinner at 00:16). The meal is stored as given; the note asks the model to
+    confirm the time with the user and fix it with update_meal if it's wrong.
+    """
+    if meal_type not in _MEAL_HOURS or not isinstance(eaten_at, datetime):
+        return None
+    day, hm = eaten_at.date(), eaten_at.strftime("%H:%M")
+    if eaten_at.hour < 4:
+        return (f"{meal_type} at {hm} counts toward {day} in the daily totals — if it was "
+                f"eaten on {day - timedelta(days=1)}, fix eaten_at with update_meal")
+    start, end = _MEAL_HOURS[meal_type]
+    if not start <= eaten_at.hour < end:
+        return (f"{meal_type} at {hm} on {day} is unusual — if the time was just when it was "
+                f"logged, ask when it was eaten and fix eaten_at with update_meal")
+    return None
+
+
+MEAL_EDITABLE = ("eaten_at", "meal_type", "description", "portion", "glycemic_index",
+                 "glycemic_load", "symptoms", "wellbeing", "notes")
+
+
+def _find_meal(conn, user_id: str, food_log_id: str):
+    try:
+        uuid.UUID(str(food_log_id))
+    except ValueError:
+        return None
+    return conn.execute(
+        text("""SELECT * FROM food_log
+                WHERE id = CAST(:id AS uuid) AND user_id = :u AND deleted_at IS NULL"""),
+        {"id": food_log_id, "u": user_id},
+    ).mappings().first()
+
+
+def update_meal(conn, user_id: str, food_log_id: str, changes: dict,
+                nutrients: dict | None = None) -> dict:
+    """Correct a logged meal: its time/date, type, description, portion, reaction, or the
+    amounts of the given nutrients (other nutrients are kept). None = keep the field."""
+    unknown = sorted(set(changes) - set(MEAL_EDITABLE))
+    if unknown:
+        return {"error": f"can't change {', '.join(unknown)} — editable: "
+                         f"{', '.join(MEAL_EDITABLE)} and nutrients"}
+    changes = {k: v for k, v in changes.items() if v is not None}
+    if not changes and not nutrients:
+        return {"error": "nothing to change — pass at least one field or nutrients"}
+    row = _find_meal(conn, user_id, food_log_id)
+    if row is None:
+        return {"error": "no meal with this id — take it from query_food"}
+    if "eaten_at" in changes and not isinstance(changes["eaten_at"], datetime):
+        try:
+            changes["eaten_at"] = datetime.fromisoformat(str(changes["eaten_at"]))
+        except ValueError:
+            return {"error": "eaten_at must be ISO 'YYYY-MM-DD HH:MM'"}
+
+    if changes:
+        sets = ", ".join(f"{k} = :{k}" for k in changes)  # keys are whitelisted above
+        conn.execute(text(f"UPDATE food_log SET {sets} WHERE id = :id"),
+                     {**changes, "id": row["id"]})
+    saved, unknown_codes = _save_nutrients(conn, row["id"], nutrients)
+    out = {"id": str(row["id"]),
+           "changed": {k: {"from": row[k], "to": v} for k, v in changes.items() if row[k] != v},
+           "nutrients_saved": saved, "unknown_codes": unknown_codes}
+    note = meal_time_note(changes.get("eaten_at", row["eaten_at"]),
+                          changes.get("meal_type", row["meal_type"]))
+    if note:
+        out["time_check"] = note
+    return out
+
+
+def delete_meal(conn, user_id: str, food_log_id: str) -> dict:
+    """Remove a logged meal from the diary and the nutrient totals (soft delete)."""
+    row = _find_meal(conn, user_id, food_log_id)
+    if row is None:
+        return {"error": "no meal with this id — take it from query_food"}
+    conn.execute(text("UPDATE food_log SET deleted_at = now() WHERE id = :id"), {"id": row["id"]})
+    return {"id": str(row["id"]), "deleted": True, "eaten_at": row["eaten_at"],
+            "meal_type": row["meal_type"], "description": row["description"]}
 
 
 def save_meal_template(conn, user_id: str, name: str, *, meal_type=None, description=None,

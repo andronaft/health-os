@@ -21,10 +21,12 @@ from core.services import (
     stage_panel,
     upsert_profile,
 )
+from core.services import delete_meal as _svc_delete_meal
 from core.services import log_from_template as _svc_log_from_template
 from core.services import map_pending_observation as _svc_map_pending
 from core.services import save_meal_template as _svc_save_meal_template
 from core.services import stop_medication as _svc_stop_medication
+from core.services import update_meal as _svc_update_meal
 from core.services import update_medication as _svc_update_medication
 from safety.alerts import send_critical_alert
 
@@ -137,6 +139,30 @@ def log_meal(description: str, meal_type: str = "", eaten_at: str = "", portion:
                            symptoms=symptoms or None, wellbeing=wellbeing or None,
                            nutrient_source=nutrient_source or "model_estimate",
                            notes=notes or None)
+    return _j(out)
+
+
+def update_meal(food_log_id: str, eaten_at: str = "", meal_type: str = "",
+                description: str = "", portion: str = "", nutrients: dict | None = None,
+                glycemic_index: int | None = None, glycemic_load: float | None = None,
+                symptoms: str = "", wellbeing: str = "", notes: str = "") -> str:
+    """Correct a logged meal; empty arguments are left unchanged."""
+    changes = dict(eaten_at=eaten_at, meal_type=meal_type, description=description,
+                   portion=portion, glycemic_index=glycemic_index, glycemic_load=glycemic_load,
+                   symptoms=symptoms, wellbeing=wellbeing, notes=notes)
+    with engine.begin() as conn:
+        uid = get_or_create_user(conn)
+        out = _svc_update_meal(conn, uid, food_log_id,
+                               {k: (None if v == "" else v) for k, v in changes.items()},
+                               nutrients=nutrients)
+    return _j(out)
+
+
+def delete_meal(food_log_id: str) -> str:
+    """Remove a logged meal (soft delete)."""
+    with engine.begin() as conn:
+        uid = get_or_create_user(conn)
+        out = _svc_delete_meal(conn, uid, food_log_id)
     return _j(out)
 
 
