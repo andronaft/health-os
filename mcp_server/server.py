@@ -398,8 +398,10 @@ def log_from_template(name: str, portion_factor: float = 1.0, eaten_at: str = ""
 @mcp.tool(annotations=STAGE)
 def stage_lab_panel(panel_date: str, rows: list[dict], panel_type: str = "",
                     facility: str = "") -> str:
-    """Stage an extracted lab panel (PENDING). rows: a list of
-    {raw_name, value, unit, ref_min, ref_max}. Critical values are alerted immediately.
+    """Stage an extracted lab panel (PENDING). panel_date: YYYY-MM-DD from the report. rows: a
+    list of {raw_name, value, unit, ref_min, ref_max}; value is a number — a printed "6,4" is
+    read as 6.4, and a qualitative result ("negative", "not detected") or a limit ("<0.5") goes
+    in as text (or pass it as value_text). Critical values are alerted immediately.
     Names not in the catalog (or whose unit can't belong to the matched marker) are stored
     UNMAPPED and pending — resolve them with map_pending_observation.
     Afterwards — show the table to the user and wait for an explicit approve_staged_source."""
