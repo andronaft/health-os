@@ -114,3 +114,75 @@ def test_query_nutrition_does_not_flag_low_sugar_as_deficient():
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM food_nutrients WHERE food_log_id=:i"), {"i": fid})
             conn.execute(text("DELETE FROM food_log WHERE id=:i"), {"i": fid})
+
+
+def _approved_glucose(effective_at=None):
+    with engine.begin() as conn:
+        uid = get_or_create_user(conn)
+        oid = ingest_observation(conn, uid, "глюкоза", 5.2, "mmol/L",
+                                 effective_at=effective_at).observation_id
+        sid = conn.execute(text("SELECT source_id FROM observations WHERE id=:i"),
+                           {"i": oid}).scalar()
+    return oid, sid
+
+
+def _drop(oid, sid):
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM observations WHERE id=:i"), {"i": oid})
+        conn.execute(text("DELETE FROM ingestion_sources WHERE id=:i"), {"i": sid})
+
+
+def test_type_code_case_and_unknown_codes_are_explained():
+    oid, sid = _approved_glucose()
+    try:
+        out = json.loads(tools.query_observations(" GLUCOSE ", days=30))
+        assert out["type_code"] == "glucose" and out["rows"] and "note" not in out
+        # a code with no values at all must not read like "no data for a real marker"
+        typo = json.loads(tools.query_observations("glucos", days=30))
+        assert "no approved values at all" in typo["note"] and "glucose" in typo["did_you_mean"]
+        trend = json.loads(tools.get_trend("Glucos"))
+        assert trend["n"] == 0 and "glucose" in trend["did_you_mean"]
+    finally:
+        _drop(oid, sid)
+
+
+def test_a_real_code_outside_the_window_says_so():
+    from datetime import datetime
+    oid, sid = _approved_glucose(effective_at=datetime(2000, 1, 3, 8, 0))
+    try:
+        out = json.loads(tools.query_observations("glucose", days=30))
+        assert out["rows"] == [] and "in this period" in out["note"]
+        assert "did_you_mean" not in out
+    finally:
+        _drop(oid, sid)
+
+
+def test_huge_day_windows_do_not_crash():
+    # make_interval overflowed for ~10^7 days and the tools failed with a bare error
+    for call in (lambda: tools.get_timeline(days=10**9),
+                 lambda: tools.query_food(days=10**9),
+                 lambda: tools.query_nutrition(days=10**9),
+                 lambda: tools.query_observations("glucose", days=10**9),
+                 lambda: tools.get_trend("glucose", days=10**9),
+                 lambda: tools.search("x", days=10**9)):
+        out = json.loads(call())
+        assert "error" not in out if isinstance(out, dict) else True
+
+
+def test_timeline_names_panels_without_a_type():
+    from core.services import stage_panel
+    with engine.begin() as conn:
+        uid = get_or_create_user(conn)
+        out = stage_panel(conn, uid, "2020-01-02", [{"raw_name": "LDL", "value": 3.0,
+                                                    "unit": "mmol/L"}], alerter=lambda *a: None)
+    try:
+        rows = json.loads(tools.get_timeline(days=36500))
+        panels = [r for r in rows if r["kind"] == "panel" and r["at"].startswith("2020-01-02")]
+        assert panels and all(r["title"] == "lab panel" for r in panels)
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM observations WHERE source_id=:s"),
+                         {"s": out["source_id"]})
+            conn.execute(text("DELETE FROM panels WHERE id=:p"), {"p": out["panel_id"]})
+            conn.execute(text("DELETE FROM ingestion_sources WHERE id=:s"),
+                         {"s": out["source_id"]})
