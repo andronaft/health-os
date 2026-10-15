@@ -1,5 +1,8 @@
+from pathlib import Path
+
+from core.config import settings
 from core.services import ingest_observation
-from safety import narrative_flags, policy
+from safety import alerts, narrative_flags, policy
 
 
 class FakeAlerter:
@@ -67,3 +70,11 @@ def test_alert_log_failure_does_not_break_delivery(monkeypatch, tmp_path, capsys
     monkeypatch.setattr(alerts, "_telegram_send", lambda *a: False)
     assert alerts.send_critical_alert("t", "potassium 6.8") == ["log"]
     assert "potassium 6.8" in capsys.readouterr().err
+
+
+def test_tests_never_reach_the_real_alert_channels(tmp_path):
+    # the install's own log, notifications and Telegram are off limits for the suite
+    real_log = Path(alerts.__file__).resolve().parent.parent / "data" / "alerts.log"
+    assert alerts._LOG != real_log and alerts._LOG.parent == tmp_path
+    assert alerts.send_critical_alert("t", "potassium 6.9") == ["log"]
+    assert not settings.alert_telegram_bot_token and not settings.alert_telegram_chat_id
