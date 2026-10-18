@@ -22,6 +22,7 @@ def test_add_and_read_through_view(conn, user_id):
 @pytest.mark.parametrize("kwargs, error", [
     ({"habit_type": ""}, "habit_type is required"),
     ({"habit_type": "alcohol", "status": "sometimes"}, "status must be"),
+    ({"habit_type": "alcohol", "frequency": "x" * 101}, "longer than 100"),
     ({"habit_type": "alcohol", "start_date": "07.2026"}, "YYYY-MM-DD"),
     ({"habit_type": "alcohol", "start_date": date.today() + timedelta(days=1)}, "in the future"),
     ({"habit_type": "alcohol", "start_date": "2026-07-01", "end_date": "2026-06-01"},
@@ -37,6 +38,8 @@ def test_update_records_quitting(conn, user_id):
     out = update_habit(conn, user_id, hid, {"status": "former", "end_date": "2026-08-15",
                                             "frequency": None})
     assert set(out["changed"]) == {"status", "end_date"}
+    out = update_habit(conn, user_id, hid, {"habit_type": " Cannabis "})
+    assert out["changed"]["habit_type"]["to"] == "cannabis"
     row = conn.execute(text("SELECT status, end_date FROM habits WHERE id = :i"),
                        {"i": hid}).one()
     assert tuple(row) == ("former", date(2026, 8, 15))
@@ -48,6 +51,7 @@ def test_update_records_quitting(conn, user_id):
     (None, {}, "nothing to change"),
     (None, {"user_id": "x"}, "can't change"),
     (None, {"end_date": "2026-06-01"}, "before start_date"),
+    (None, {"habit_type": "y" * 51}, "longer than 50"),
 ])
 def test_update_rejects_bad_input(conn, user_id, habit_id, changes, error):
     hid = add_habit(conn, user_id, "smoking", start_date="2026-07-01")["id"]

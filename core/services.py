@@ -244,8 +244,16 @@ HABIT_EDITABLE = ("habit_type", "status", "frequency", "cigarettes_per_day", "sm
                   "drinks_per_week", "start_date", "end_date", "notes")
 
 
+_HABIT_MAX_LEN = {"habit_type": 50, "status": 50, "frequency": 100}  # column sizes
+
+
 def _check_habit(fields: dict) -> str | None:
     """Validate and coerce habit fields in place; returns an error or None."""
+    if fields.get("habit_type") is not None:
+        fields["habit_type"] = fields["habit_type"].strip().lower()
+    for k, n in _HABIT_MAX_LEN.items():
+        if fields.get(k) is not None and len(fields[k]) > n:
+            return f"{k} is longer than {n} characters — put details into notes"
     if fields.get("status") is not None and fields["status"] not in HABIT_STATUSES:
         return f"status must be one of {', '.join(HABIT_STATUSES)}"
     for k in ("start_date", "end_date"):
@@ -266,10 +274,10 @@ def add_habit(conn, user_id: str, habit_type: str, *, status="current", frequenc
 
     Dates are optional — "since July" without a day is a note, not an invented date.
     """
-    habit_type = (habit_type or "").strip().lower()
-    if not habit_type:
+    if not (habit_type or "").strip():
         return {"error": "habit_type is required (e.g. smoking, alcohol, cannabis)"}
-    fields = {"status": status, "start_date": start_date, "end_date": end_date}
+    fields = {"habit_type": habit_type, "status": status, "frequency": frequency,
+              "start_date": start_date, "end_date": end_date}
     err = _check_habit(fields)
     if err:
         return {"error": err}
@@ -285,7 +293,8 @@ def add_habit(conn, user_id: str, habit_type: str, *, status="current", frequenc
             VALUES (:uid, :t, :s, :f, :cpd, :sy, :dpw, :sd, :ed, :n, :sid) RETURNING id
             """
         ),
-        dict(uid=user_id, t=habit_type, s=fields["status"], f=frequency, cpd=cigarettes_per_day,
+        dict(uid=user_id, t=fields["habit_type"], s=fields["status"], f=frequency,
+             cpd=cigarettes_per_day,
              sy=smoking_years, dpw=drinks_per_week, sd=fields["start_date"],
              ed=fields["end_date"], n=notes, sid=sid),
     ).scalar()
