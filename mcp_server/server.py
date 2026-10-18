@@ -44,6 +44,8 @@ Only READ-ONLY views are available (approved + not deleted):
   v_medications_current(id, medication_name, dose_amount, dose_unit, times_per_day, ...)
   v_diagnoses(id, diagnosed_at, diagnosis_name, icd10_code, clinical_status, verification_status)
   v_allergies(id, allergen, reaction, severity, verified)     -- verified=false is ALSO an allergy
+  v_habits(id, habit_type, status, frequency, cigarettes_per_day, smoking_years,
+           drinks_per_week, start_date, end_date, notes)       -- smoking/alcohol/cannabis…
   v_food_log(id, user_id, eaten_at, meal_type, description, portion,
              nutrient_source, glycemic_index, glycemic_load, symptoms, wellbeing, notes)
   v_food_nutrients(food_log_id, user_id, eaten_at, meal_type, nutrient_code, name_uk,
@@ -144,6 +146,17 @@ def get_allergies() -> str:
     because it is "unverified". Use before any discussion of foods or medications; to add one
     use record_allergy."""
     return tools.get_allergies()
+
+
+@mcp.tool(annotations=READ)
+def get_habits() -> str:
+    """Habits the user reported — smoking, alcohol, cannabis, vaping and similar: habit_type,
+    status (current / former / never), frequency as said (e.g. "about once a week"), optional
+    cigarettes_per_day / smoking_years / drinks_per_week, start/end dates and notes. Former
+    habits are listed too (pack-years and past exposure matter for risk). Take them into account
+    for blood pressure, heart rate, lung and liver questions; state them as facts, without
+    moralising. To add one use record_habit, to change one update_habit."""
+    return tools.get_habits()
 
 
 @mcp.tool(annotations=READ)
@@ -328,6 +341,37 @@ def stop_medication(medication_id: str, end_date: str = "", stop_reason: str = "
     Only when the user says it was stopped — never suggest stopping a medication. If the side
     effect sounds like an allergic reaction, offer record_allergy too."""
     return write_tools.stop_medication(medication_id, end_date, stop_reason, side_effects)
+
+
+@mcp.tool(annotations=WRITE)
+def record_habit(habit_type: str, status: str = "current", frequency: str = "",
+                 start_date: str = "", end_date: str = "", notes: str = "",
+                 cigarettes_per_day: int | None = None, smoking_years: int | None = None,
+                 drinks_per_week: float | None = None) -> str:
+    """Add a habit the user reports (stored immediately as approved): habit_type — smoking /
+    alcohol / cannabis / vaping / other substance, lower-case; status: current (default) /
+    former / never; frequency: as the user said it ("about once a week", "daily"); start_date /
+    end_date: YYYY-MM-DD, only when the user gave the day — otherwise leave empty and put "since
+    July 2026" into notes, never invent a day; notes: details (mixed with tobacco, CBD/THC, …);
+    cigarettes_per_day / smoking_years / drinks_per_week when known. A change of pattern
+    (e.g. stopped mixing with tobacco) = mark the old entry former via update_habit and record
+    the new one. Check get_habits first to avoid duplicates."""
+    return write_tools.record_habit(habit_type, status, frequency, start_date, end_date, notes,
+                                    cigarettes_per_day, smoking_years, drinks_per_week)
+
+
+@mcp.tool(annotations=WRITE_IDEMPOTENT)
+def update_habit(habit_id: str, habit_type: str = "", status: str = "", frequency: str = "",
+                 start_date: str = "", end_date: str = "", notes: str = "",
+                 cigarettes_per_day: int | None = None, smoking_years: int | None = None,
+                 drinks_per_week: float | None = None) -> str:
+    """Correct a recorded habit or record a change in it: habit_id from get_habits; pass only
+    the fields to change (empty = keep). "I quit in September" = status former + end_date;
+    "now twice a week" = frequency. notes replaces the old text — pass the full new note.
+    Dates YYYY-MM-DD, not in the future."""
+    return write_tools.update_habit(habit_id, habit_type, status, frequency, start_date,
+                                    end_date, notes, cigarettes_per_day, smoking_years,
+                                    drinks_per_week)
 
 
 @mcp.tool(annotations=WRITE)

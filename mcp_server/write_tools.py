@@ -15,6 +15,7 @@ from core.services import (
     add_allergy,
     add_diagnosis,
     add_food_log,
+    add_habit,
     add_medication,
     approve_staged,
     get_or_create_user,
@@ -26,6 +27,7 @@ from core.services import log_from_template as _svc_log_from_template
 from core.services import map_pending_observation as _svc_map_pending
 from core.services import save_meal_template as _svc_save_meal_template
 from core.services import stop_medication as _svc_stop_medication
+from core.services import update_habit as _svc_update_habit
 from core.services import update_meal as _svc_update_meal
 from core.services import update_medication as _svc_update_medication
 from safety.alerts import send_critical_alert
@@ -112,6 +114,37 @@ def stop_medication(medication_id: str, end_date: str = "", stop_reason: str = "
                                    end_date=end_date or date.today().isoformat(),
                                    stop_reason=stop_reason or None,
                                    side_effects=side_effects or None)
+    return _j(out)
+
+
+def record_habit(habit_type: str, status: str = "current", frequency: str = "",
+                 start_date: str = "", end_date: str = "", notes: str = "",
+                 cigarettes_per_day: int | None = None, smoking_years: int | None = None,
+                 drinks_per_week: float | None = None) -> str:
+    """Add a habit (smoking/alcohol/cannabis/…). status: current/former/never."""
+    with engine.begin() as conn:
+        uid = get_or_create_user(conn)
+        out = add_habit(conn, uid, habit_type, status=status or "current",
+                        frequency=frequency or None, cigarettes_per_day=cigarettes_per_day,
+                        smoking_years=smoking_years, drinks_per_week=drinks_per_week,
+                        start_date=start_date or None, end_date=end_date or None,
+                        notes=notes or None)
+    return _j(out)
+
+
+def update_habit(habit_id: str, habit_type: str = "", status: str = "", frequency: str = "",
+                 start_date: str = "", end_date: str = "", notes: str = "",
+                 cigarettes_per_day: int | None = None, smoking_years: int | None = None,
+                 drinks_per_week: float | None = None) -> str:
+    """Correct a habit or record a change (empty = keep)."""
+    changes = {"habit_type": habit_type or None, "status": status or None,
+               "frequency": frequency or None, "start_date": start_date or None,
+               "end_date": end_date or None, "notes": notes or None,
+               "cigarettes_per_day": cigarettes_per_day, "smoking_years": smoking_years,
+               "drinks_per_week": drinks_per_week}
+    with engine.begin() as conn:
+        uid = get_or_create_user(conn)
+        out = _svc_update_habit(conn, uid, habit_id, changes)
     return _j(out)
 
 

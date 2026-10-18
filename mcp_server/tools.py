@@ -241,6 +241,10 @@ def get_allergies() -> str:
     return _simple_view("v_allergies")
 
 
+def get_habits() -> str:
+    return _simple_view("v_habits")
+
+
 def list_pending_reviews() -> str:
     return _simple_view("v_observations_pending")
 
