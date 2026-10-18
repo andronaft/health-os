@@ -38,8 +38,8 @@ Only Docker needed. Starts a throwaway database with a fictional patient — two
 (LDL creeping up), blood pressure, medications, a food log and a lab panel awaiting approval:
 
 ```bash
-git clone https://github.com/andronaft/health-os && cd health-os/demo
-docker compose up -d --build
+git clone https://github.com/andronaft/health-os && cd health-os
+make demo                             # or: cd demo && docker compose up -d --build
 ```
 
 Point your MCP client at it:
@@ -59,7 +59,7 @@ Point your MCP client at it:
 ```
 
 Ask *"show my health summary"*, *"is my LDL trending up?"*, *"what's pending review?"*,
-*"what am I short on nutritionally?"*. Remove it all with `docker compose down -v`.
+*"what am I short on nutritionally?"*. Remove it all with `make demo-down`.
 
 ## Install for your own data
 

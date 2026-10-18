@@ -134,8 +134,12 @@ def load_demo(conn, *, today: date | None = None) -> str:
 def main() -> None:
     from core.db import engine
 
-    with engine.begin() as conn:
-        load_demo(conn)
+    try:
+        with engine.begin() as conn:
+            load_demo(conn)
+    except RuntimeError as e:  # a CLI message, not a traceback
+        raise SystemExit(f"Demo patient not loaded: {e}. For a throwaway demo database "
+                         "run `make demo` (demo/docker-compose.yml).") from None
     print("Demo patient loaded. Connect an MCP client and ask for the health summary.")
 
 
