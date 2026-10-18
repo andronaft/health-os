@@ -1,4 +1,6 @@
-from core.normalize import canonicalize, compute_status, normalize
+import pytest
+
+from core.normalize import canonicalize, compute_status, find_type, normalize
 
 
 # --- pure unit tests (no DB) ---
@@ -45,3 +47,17 @@ def test_unit_gate_unknown_unit_blocked(conn):
 def test_identity_when_already_canonical(conn):
     nr = normalize("глюкоза", 5.2, "mmol/L", conn)
     assert nr.value_canonical == 5.2
+
+
+@pytest.mark.parametrize("printed,code", [
+    ("Leukozyten", "leukocytes"), ("Leukocyty", "leukocytes"), ("Płytki krwi", "platelets"),
+    ("Thrombozyten", "platelets"), ("Glukoza", "glucose"), ("Kreatynina", "creatinine"),
+    ("Harnstoff", "urea"), ("Ferrytyna", "ferritin"), ("Gesamtcholesterin", "cholesterol_total"),
+    ("Cholesterol całkowity", "cholesterol_total"), ("LDL-Cholesterin", "ldl"),
+    ("HDL-Cholesterol", "hdl"), ("Triglicéridos", "triglycerides"), ("Witamina D", "vitamin_d"),
+    ("Haemoglobin", "hemoglobin"), ("Hämoglobin", "hemoglobin"),
+    # GOT = AST, GPT = ALT (the first version of this list had them swapped)
+    ("GOT", "ast"), ("GPT", "alt"),
+])
+def test_es_de_pl_names_find_the_right_type(conn, printed, code):
+    assert find_type(printed, conn)["code"] == code
