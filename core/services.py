@@ -237,6 +237,99 @@ def stop_medication(conn, user_id: str, medication_id: str, *, end_date,
             "status": "stopped", "start_date": row["start_date"], "end_date": end}
 
 
+# --------------------------------------------------------------------------- habits
+HABIT_STATUSES = ("current", "former", "never")
+# fields a correction may touch (status/end_date included: "I quit" is an update here)
+HABIT_EDITABLE = ("habit_type", "status", "frequency", "cigarettes_per_day", "smoking_years",
+                  "drinks_per_week", "start_date", "end_date", "notes")
+
+
+def _check_habit(fields: dict) -> str | None:
+    """Validate and coerce habit fields in place; returns an error or None."""
+    if fields.get("status") is not None and fields["status"] not in HABIT_STATUSES:
+        return f"status must be one of {', '.join(HABIT_STATUSES)}"
+    for k in ("start_date", "end_date"):
+        if fields.get(k) is not None:
+            try:
+                fields[k] = _as_date(fields[k])
+            except ValueError:
+                return f"{k} must be YYYY-MM-DD"
+            if fields[k] > date.today():
+                return f"{k} is in the future"
+    return None
+
+
+def add_habit(conn, user_id: str, habit_type: str, *, status="current", frequency=None,
+              cigarettes_per_day=None, smoking_years=None, drinks_per_week=None,
+              start_date=None, end_date=None, notes=None) -> dict:
+    """Record a habit the user reports: smoking, alcohol, cannabis, vaping… (auto-approved).
+
+    Dates are optional — "since July" without a day is a note, not an invented date.
+    """
+    habit_type = (habit_type or "").strip().lower()
+    if not habit_type:
+        return {"error": "habit_type is required (e.g. smoking, alcohol, cannabis)"}
+    fields = {"status": status, "start_date": start_date, "end_date": end_date}
+    err = _check_habit(fields)
+    if err:
+        return {"error": err}
+    if fields["start_date"] and fields["end_date"] and fields["end_date"] < fields["start_date"]:
+        return {"error": "end_date is before start_date"}
+    sid = manual_source(conn, user_id)
+    hid = conn.execute(
+        text(
+            """
+            INSERT INTO habits (user_id, habit_type, status, frequency, cigarettes_per_day,
+                                smoking_years, drinks_per_week, start_date, end_date, notes,
+                                source_id)
+            VALUES (:uid, :t, :s, :f, :cpd, :sy, :dpw, :sd, :ed, :n, :sid) RETURNING id
+            """
+        ),
+        dict(uid=user_id, t=habit_type, s=fields["status"], f=frequency, cpd=cigarettes_per_day,
+             sy=smoking_years, dpw=drinks_per_week, sd=fields["start_date"],
+             ed=fields["end_date"], n=notes, sid=sid),
+    ).scalar()
+    return {"id": str(hid)}
+
+
+def update_habit(conn, user_id: str, habit_id: str, changes: dict) -> dict:
+    """Correct a habit or record a change in it ("quit in September", "now twice a week").
+
+    Only the given fields change (None = keep).
+    """
+    unknown = sorted(set(changes) - set(HABIT_EDITABLE))
+    if unknown:
+        return {"error": f"can't change {', '.join(unknown)} — editable: "
+                         f"{', '.join(HABIT_EDITABLE)}"}
+    changes = {k: v for k, v in changes.items() if v is not None}
+    if not changes:
+        return {"error": "nothing to change — pass at least one field"}
+    try:
+        uuid.UUID(str(habit_id))
+    except ValueError:
+        return {"error": "no habit with this id — take it from get_habits"}
+    row = conn.execute(
+        text("""SELECT * FROM habits
+                WHERE id = CAST(:id AS uuid) AND user_id = :u AND deleted_at IS NULL"""),
+        {"id": habit_id, "u": user_id},
+    ).mappings().first()
+    if row is None:
+        return {"error": "no habit with this id — take it from get_habits"}
+    err = _check_habit(changes)
+    if err:
+        return {"error": err}
+    start = changes.get("start_date", row["start_date"])
+    end = changes.get("end_date", row["end_date"])
+    if start and end and end < start:
+        return {"error": "end_date is before start_date"}
+
+    sets = ", ".join(f"{k} = :{k}" for k in changes)  # keys are whitelisted above
+    conn.execute(text(f"UPDATE habits SET {sets} WHERE id = :id"), {**changes, "id": row["id"]})
+    return {"id": str(row["id"]),
+            "changed": {k: {"from": row[k], "to": v} for k, v in changes.items()
+                        if row[k] != v}}
+
+
 # --------------------------------------------------------------------------- food diary
 def add_food_log(conn, user_id: str, description: str, *, eaten_at, meal_type=None,
                  portion=None, nutrients: dict | None = None, glycemic_index=None,

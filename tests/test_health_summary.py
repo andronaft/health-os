@@ -15,7 +15,8 @@ def test_summary_reflects_entities_and_validates(conn, user_id):
 
     res = build(conn, user_id)
     assert res.valid, res.issues
-    assert res.counts == {"allergies": 2, "active_diagnoses": 1, "current_medications": 1}
+    assert res.counts == {"allergies": 2, "active_diagnoses": 1, "current_medications": 1,
+                          "habits": 0}
     # the unverified allergy is marked as such
     assert "unverified" in res.text
     # a suspected diagnosis is not presented as fact

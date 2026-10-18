@@ -6,7 +6,7 @@ the system is dead). So this block is built SQL→template, zero LLM. The LLM bl
 (trends/questions) is added separately later in Phase 1, AFTER the cache breakpoint, and
 never touches these sections.
 
-Post-validation: the count of allergies/diagnoses/medications in the text == COUNT from the
+Post-validation: the count of allergies/diagnoses/medications/habits in the text == COUNT from the
 database; on a mismatch the summary is not published (the old version stays + an alert).
 
 "Absence of data is also a clinical fact" (protection against false reassurance): a list of
@@ -165,6 +165,27 @@ def build(conn, user_id: str) -> SummaryResult:
         lines.append("- None in the system.")
     lines.append("")
 
+    # --- habits: current + former (past smoking still counts for risk) ---
+    habits = conn.execute(
+        text(
+            """SELECT habit_type, status, frequency, start_date, end_date FROM habits
+               WHERE user_id=:u AND deleted_at IS NULL AND status IN ('current', 'former')
+               ORDER BY status = 'current' DESC, start_date DESC NULLS LAST"""
+        ),
+        {"u": user_id},
+    ).mappings().all()
+    counts["habits"] = len(habits)
+    lines.append(f"## Habits ({len(habits)})")
+    if habits:
+        for h in habits:
+            freq = f", {h['frequency']}" if h["frequency"] else ""
+            since = f" since {h['start_date']}" if h["start_date"] else ""
+            until = f" until {h['end_date']}" if h["end_date"] else ""
+            lines.append(f"- {h['habit_type']} — {h['status']}{freq}{since}{until}")
+    else:
+        lines.append("- None recorded (≠ none: may simply not have been asked).")
+    lines.append("")
+
     # --- last panel + what hasn't been checked in a long time/ever ---
     last_panel = conn.execute(
         text("SELECT max(panel_date) FROM panels WHERE user_id=:u"), {"u": user_id}
@@ -209,6 +230,8 @@ def _validate(conn, user_id: str, rendered: str, counts: dict[str, int]) -> tupl
                             "AND clinical_status='active' AND deleted_at IS NULL",
         "current_medications": "SELECT count(*) FROM medications WHERE user_id=:u "
                               "AND status='taking' AND deleted_at IS NULL",
+        "habits": "SELECT count(*) FROM habits WHERE user_id=:u AND deleted_at IS NULL "
+                  "AND status IN ('current', 'former')",
     }
     for key, sql in checks.items():
         db_n = conn.execute(text(sql), {"u": user_id}).scalar()
