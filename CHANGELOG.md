@@ -6,6 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ## [Unreleased]
 
+### Fixed
+- The narrative critical-findings classifier missed Spanish reports: *aneurisma*, *trombosis*,
+  *infarto*, *ictus*, *masa*, *nódulo sospechoso*, *lesión ocupante de espacio*, *disección
+  aórtica* and more now flag, with or without accents. Also added in every language: lymphoma,
+  leukaemia, melanoma and aortic dissection. Negation stays unhandled on purpose (documented);
+  only "índice de masa corporal", bone/muscle/ventricular mass are excluded (#30).
+
 ## [0.3.0] — 2026-10-15
 
 ### Changed
