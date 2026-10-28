@@ -20,7 +20,8 @@ AGENTS="$HOME/Library/LaunchAgents"
 mkdir -p "$DEST" "$STATE" "$AGENTS"
 chmod 700 "$DEST"
 
-cp "$ROOT/scripts/backup.sh" "$ROOT/scripts/restore_test.sh" "$DEST/"
+cp "$ROOT/scripts/backup.sh" "$ROOT/scripts/restore_test.sh" "$ROOT/scripts/_ensure_docker.sh" \
+  "$DEST/"
 
 # only what the jobs need (no API keys, no DB URLs, no DOCS_DIR)
 ENV_OUT="$DEST/backup.env"
