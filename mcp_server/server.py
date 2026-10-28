@@ -180,6 +180,17 @@ def search(query: str, limit: int = 8, days: int = 0) -> str:
 
 
 @mcp.tool(annotations=READ)
+def get_anomalies(type_code: str = "", days: int = 90, z_threshold: float = 2.0) -> str:
+    """Personal-baseline anomalies: for each marker whose latest approved value is within the
+    last `days` (default 90), compares it with that marker's own earlier values (mean ± SD of up
+    to 90 previous values) and lists those beyond z_threshold (default 2), largest first. Skips
+    markers with fewer than 5 earlier values. Useful for wearables (HRV, resting HR, sleep) and
+    long lab histories. type_code: limit to one marker. A deviation from the user's own history
+    is not a diagnosis — present it as "worth repeating / discussing", never as alarming."""
+    return tools.get_anomalies(type_code, days, z_threshold)
+
+
+@mcp.tool(annotations=READ)
 def get_screening_recommendations() -> str:
     """Screening calendar for the user's profile (age-gate, "you don't need this yet").
     Statuses: due/overdue/up_to_date/not_yet. Requires a filled-in profile."""

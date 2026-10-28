@@ -28,6 +28,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   leukaemia, melanoma and aortic dissection. Negation stays unhandled on purpose (documented);
   only "índice de masa corporal", bone/muscle/ventricular mass are excluded (#30).
 
+### Added
+- `get_anomalies` — compares each marker's latest approved value with the user's own earlier
+  values (mean ± SD of up to 90 previous values) and lists those beyond a z threshold. Uses the
+  existing `analytics/baselines.py`, which no tool reached before. Markers with fewer than 5
+  earlier values and personal records (`pr_*`, which only ever improve) are skipped. README no
+  longer claims risk calculators beyond their age gate (#33).
+
 ## [0.3.0] — 2026-10-15
 
 ### Changed

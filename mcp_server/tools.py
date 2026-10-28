@@ -285,6 +285,65 @@ def get_trend(type_code: str, days: int = 1825) -> str:
                       ensure_ascii=False)
 
 
+def get_anomalies(type_code: str = "", days: int = 90, z_threshold: float = 2.0) -> str:
+    """For every marker whose latest approved value falls in the last `days`, compare that value
+    with the personal baseline built from the marker's earlier values (up to the 90 before it).
+    Deterministic (analytics.baselines); a marker with fewer than 5 earlier values is skipped,
+    and so are personal records (pr_*), which only ever improve."""
+    from datetime import UTC, datetime, timedelta
+
+    from analytics.baselines import check_anomaly
+
+    code = (type_code or "").strip().lower()
+    days = _days(days)
+    with engine.connect() as conn:
+        uid = _user_id(conn)
+        if not uid:
+            return _no_user_error()
+        rows = conn.execute(
+            text(
+                f"""SELECT type_code, name_uk, category, effective_at, value_canonical, canonical_unit
+                    FROM v_observations
+                    WHERE user_id=:u AND value_canonical IS NOT NULL
+                      {"AND type_code=:c" if code else ""}
+                    ORDER BY type_code, effective_at"""
+            ),
+            {"u": uid, "c": code},
+        ).mappings().all()
+        missing = _no_values_note(conn, uid, code) if code and not rows else {}
+
+    by_code: dict[str, list] = {}
+    for r in rows:
+        by_code.setdefault(r["type_code"], []).append(r)
+    since = datetime.now(UTC) - timedelta(days=days)
+    anomalies, checked, too_short = [], 0, 0
+    for c, series in by_code.items():
+        latest = series[-1]
+        # personal records (pr_*) only ever improve, so they always look like an anomaly
+        if c.startswith("pr_") or latest["effective_at"] < since:
+            continue
+        history = [float(r["value_canonical"]) for r in series[-91:-1]]
+        res = check_anomaly(float(latest["value_canonical"]), history, z_threshold=z_threshold)
+        if res.z is None and not res.is_anomaly and len(history) < 5:
+            too_short += 1
+            continue
+        checked += 1
+        if res.is_anomaly:
+            anomalies.append({"type_code": c, "name_uk": latest["name_uk"],
+                              "category": latest["category"], "at": latest["effective_at"],
+                              "value": float(latest["value_canonical"]),
+                              "unit": latest["canonical_unit"],
+                              "z": round(res.z, 2) if res.z is not None else None,
+                              "detail": res.detail})
+    anomalies.sort(key=lambda a: -abs(a["z"] or 0))
+    return json.dumps({"window_days": days, "z_threshold": z_threshold,
+                       "markers_checked": checked, "skipped_short_history": too_short,
+                       "anomalies": anomalies, **missing,
+                       "caveat": ("A deviation from YOUR earlier values, not a diagnosis; it can "
+                                  "be noise, a lab change or a real change — repeat or discuss.")},
+                      default=str, ensure_ascii=False)
+
+
 def get_screening_recommendations() -> str:
     """Screening calendar for the profile (deterministic, with age-gate and "you don't need this yet")."""
     from datetime import date
