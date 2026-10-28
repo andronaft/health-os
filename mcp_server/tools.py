@@ -275,10 +275,12 @@ def get_trend(type_code: str, days: int = 1825) -> str:
         ).all()
         missing = _no_values_note(conn, uid, type_code) if not rows else {}
     values = [float(r[0]) for r in rows]
-    t = _trend(values)
+    t = _trend(values, times=[r[1] for r in rows])
     date_from = str(rows[0][1]) if rows else None
     date_to = str(rows[-1][1]) if rows else None
     return json.dumps({"type_code": type_code, "n": t.n, "direction": t.direction,
+                       "slope_per_year": (round(t.slope_per_year, 4)
+                                          if t.slope_per_year is not None else None),
                        "detail": t.detail, "from": date_from, "to": date_to, **missing},
                       ensure_ascii=False)
 
