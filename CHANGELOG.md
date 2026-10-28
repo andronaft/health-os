@@ -18,6 +18,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   for the database, and a failure is written to the log as `backup FAILED` and shown as a macOS
   notification. Re-run `scripts/install_launchd.sh` to update the scheduled copies.
 
+- `get_trend`: the Mann-Kendall variance now has the standard tie correction (rounded lab values
+  and integer wearable readings repeat often, so real trends were missed), and the slope is
+  reported per year — a Theil–Sen median over the measurement dates, robust to outliers and
+  uneven gaps — as `slope_per_year` (#34).
 - The narrative critical-findings classifier missed Spanish reports: *aneurisma*, *trombosis*,
   *infarto*, *ictus*, *masa*, *nódulo sospechoso*, *lesión ocupante de espacio*, *disección
   aórtica* and more now flag, with or without accents. Also added in every language: lymphoma,

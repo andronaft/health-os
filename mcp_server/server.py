@@ -188,8 +188,9 @@ def get_screening_recommendations() -> str:
 
 @mcp.tool(annotations=READ)
 def get_trend(type_code: str, days: int = 1825) -> str:
-    """Statistical trend of one marker over time (Mann-Kendall test + slope) on approved values:
-    direction increasing / decreasing / no_trend with z, p-value and slope per measurement.
+    """Statistical trend of one marker over time (Mann-Kendall test with tie correction) on
+    approved values: direction increasing / decreasing / no_trend with z, p-value, and
+    slope_per_year (Theil–Sen over the measurement dates, robust to outliers and uneven gaps).
     Needs at least 5 values in the window, otherwise returns no_trend with the reason.
     Use for "is X going up/down"; for the raw values use query_observations.
     type_code: catalog code such as ldl, hemoglobin, vitamin_d, resting_hr, hrv (as returned by
