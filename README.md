@@ -31,7 +31,7 @@ schedules are deterministic code, not LLM judgement.
   formulas aren't implemented yet.
 - **Food log** — meals with a 41-nutrient profile, %RDA, deficiency/excess flags, meal templates.
 - **Devices** — Apple Health export and Garmin import.
-- **37 MCP tools + server instructions** — the safety rules are sent to every client on connect;
+- **38 MCP tools + server instructions** — the safety rules are sent to every client on connect;
   see [mcp_server/README.md](mcp_server/README.md).
 
 ## Try it in one command

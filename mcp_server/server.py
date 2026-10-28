@@ -191,6 +191,17 @@ def get_anomalies(type_code: str = "", days: int = 90, z_threshold: float = 2.0)
 
 
 @mcp.tool(annotations=READ)
+def check_data_quality() -> str:
+    """Checks of the stored RECORDS, not of health: reference ranges that are swapped, empty or
+    much narrower than the same marker's other ranges (typical recognition errors); lab values
+    that jumped ≥5× from the previous value of the same marker; approved numbers without a
+    canonical value; the review queue; diagnoses still "active" after 2+ years. Use when the user
+    asks whether their data is in order, before a doctor visit, or when a value looks odd.
+    Present items as "verify against the original document", never as findings about health."""
+    return tools.check_data_quality()
+
+
+@mcp.tool(annotations=READ)
 def get_screening_recommendations() -> str:
     """Screening calendar for the user's profile (age-gate, "you don't need this yet").
     Statuses: due/overdue/up_to_date/not_yet. Requires a filled-in profile."""

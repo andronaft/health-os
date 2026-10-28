@@ -67,6 +67,7 @@ trend over 2 years", "what is pending review", "what did I eat this week and wha
 | list_meal_templates | saved frequent meals |
 | search | full-text (+ optional semantic) search over document narratives |
 | list_pending_reviews | review queue (NOT approved — never cited as fact) |
+| check_data_quality | what to verify against the originals: odd reference ranges, ≥5× jumps between lab values, numbers without a canonical value, queue, stale diagnoses |
 | sql_query | arbitrary READ-ONLY SELECT (read-only tx + 5s timeout, SELECT/WITH only) |
 
 **Safety**
