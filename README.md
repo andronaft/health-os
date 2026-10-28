@@ -25,11 +25,13 @@ schedules are deterministic code, not LLM judgement.
   questions are refused and redirected to a doctor/pharmacist (only deterministic checks run:
   total daily paracetamol across products, biotin before lab tests); a crisis tool returns a
   fixed response with hotlines, independent of the model.
-- **Trends and analytics** — Mann-Kendall trends, personal baselines and anomalies,
-  age-gated risk calculators, a screening calendar, a weekly report, a doctor-visit brief.
+- **Trends and analytics** — Mann-Kendall trends with a per-year slope, anomalies against your
+  own baseline (`get_anomalies`), a screening calendar, a weekly report, a doctor-visit brief.
+  Risk calculators (SCORE2, ASCVD, FRAX) so far only enforce their validated age range; the
+  formulas aren't implemented yet.
 - **Food log** — meals with a 41-nutrient profile, %RDA, deficiency/excess flags, meal templates.
 - **Devices** — Apple Health export and Garmin import.
-- **36 MCP tools + server instructions** — the safety rules are sent to every client on connect;
+- **37 MCP tools + server instructions** — the safety rules are sent to every client on connect;
   see [mcp_server/README.md](mcp_server/README.md).
 
 ## Try it in one command
