@@ -15,7 +15,17 @@ PG_USER="${POSTGRES_USER:-health}"
 PG_DB="${POSTGRES_DB:-health_os}"
 
 TMPDIR="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR"' EXIT
+. "$(dirname "${BASH_SOURCE[0]}")/_ensure_docker.sh"
+on_exit() {
+  local rc=$?
+  rm -rf "$TMPDIR"
+  if [ "$rc" -ne 0 ]; then
+    echo "$(date +%Y-%m-%d_%H:%M:%S) FAILED (exit $rc)" >> "$STATE/restore_test.log"
+    notify "Health OS — restore test failed" "The weekly restore test failed (exit $rc)."
+  fi
+}
+trap on_exit EXIT
+ensure_docker "$CONTAINER"
 
 # Джерело дампа: restic (зовнішній диск) якщо доступний, інакше — останній локальний дамп.
 if [ -n "${RESTIC_REPOSITORY:-}" ] && [ -n "${RESTIC_PASSWORD:-}" ] && [ -d "${RESTIC_REPOSITORY}" ]; then

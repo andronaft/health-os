@@ -25,6 +25,18 @@ TS="$(date +%Y%m%d_%H%M%S)"
 DUMP="$STATE/backups/pg_${TS}.dump"
 mkdir -p "$STATE/backups"
 
+# a failed backup is logged and shown, never silent
+. "$(dirname "${BASH_SOURCE[0]}")/_ensure_docker.sh"
+on_exit() {
+  local rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') backup FAILED (exit $rc)" >> "$STATE/backup.log"
+    notify "Health OS — backup failed" "No backup was made (exit $rc). Details: $STATE/backup.log"
+  fi
+}
+trap on_exit EXIT
+ensure_docker "$CONTAINER"
+
 echo "[1/3] pg_dump (локальний, завжди)…"
 docker exec "$CONTAINER" pg_dump -U "${POSTGRES_USER:-health}" -Fc "${POSTGRES_DB:-health_os}" > "$DUMP"
 echo "  → $DUMP ($(du -h "$DUMP" | cut -f1))"
