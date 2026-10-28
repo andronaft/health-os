@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     alert_telegram_chat_id: str = ""
     # ISO country code for crisis hotlines in safety/crisis.py (default UA).
     crisis_country: str = "UA"
+    # Language of the system's own safety messages (critical values): en / uk / es.
+    health_os_lang: str = "en"
 
 
 settings = Settings()

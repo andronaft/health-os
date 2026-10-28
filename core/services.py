@@ -610,10 +610,10 @@ def ingest_observation(
     if critical:
         needs_review, effective_status = True, "pending"
         status = "critical"
-        notes.append("CRITICAL value — forced display; " + critical.message_uk)
+        notes.append("CRITICAL value — forced display; " + critical.message)
         if alerter is not None:
             alerter("Health OS — critical value",
-                    f"{nr.type_code} {critical.value}{critical.unit}: {critical.message_uk}")
+                    f"{nr.type_code} {critical.value}{critical.unit}: {critical.message}")
     if critical_unverified:
         notes.append(f"CRITICAL CHECK IMPOSSIBLE — unit “{unit}” not recognized for "
                      f"{nr.type_code}; compare the value with the form now")
@@ -1027,7 +1027,7 @@ def map_pending_observation(conn, user_id: str, observation_id: str, type_code: 
 
     if alerter is not None and critical:
         alerter("Health OS — critical value",
-                f"{type_code} {critical.value}{critical.unit}: {critical.message_uk}")
+                f"{type_code} {critical.value}{critical.unit}: {critical.message}")
     elif alerter is not None and critical_unverified:
         alerter("Health OS — verify a value",
                 f"{type_code} {value} {row['unit']}: unit not recognized, critical check impossible")
@@ -1048,7 +1048,7 @@ def map_pending_observation(conn, user_id: str, observation_id: str, type_code: 
                 "user instruction.",
     }
     if critical:
-        out["note"] = "CRITICAL value — forced display; " + critical.message_uk
+        out["note"] = "CRITICAL value — forced display; " + critical.message
     if value is not None and value_canonical is None:
         out["note"] = (f"no unit conversion “{row['unit']}” → {t['canonical_unit']} (unit gate); "
                        "approval will ask for allow_missing_canonical")

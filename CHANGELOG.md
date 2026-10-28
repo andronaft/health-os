@@ -6,13 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ## [Unreleased]
 
+### Changed
+- Critical-value messages in tool output and alerts are in English by default, with Ukrainian
+  and Spanish available through `HEALTH_OS_LANG` (`en` / `uk` / `es`). They were Ukrainian
+  only, so an English-speaking user got the system's most important message in a language
+  they may not read (#32).
+
 ### Fixed
 - Backups were silently skipped when Docker Desktop wasn't running ("Cannot connect to the
   Docker daemon"): `backup.sh` and `restore_test.sh` now start Docker Desktop on macOS and wait
   for the database, and a failure is written to the log as `backup FAILED` and shown as a macOS
   notification. Re-run `scripts/install_launchd.sh` to update the scheduled copies.
 
-### Fixed
 - The narrative critical-findings classifier missed Spanish reports: *aneurisma*, *trombosis*,
   *infarto*, *ictus*, *masa*, *nódulo sospechoso*, *lesión ocupante de espacio*, *disección
   aórtica* and more now flag, with or without accents. Also added in every language: lymphoma,
