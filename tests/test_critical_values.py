@@ -46,3 +46,33 @@ def test_none_value_is_safe():
 
 def test_unknown_type_is_none():
     assert evaluate("unknown_code", 999.0, "mmol/L", THRESHOLDS) is None
+
+
+# --- messages per language (#32): English by default, Ukrainian from the DB, Spanish ---
+def test_message_defaults_to_english(monkeypatch):
+    from core.config import Settings, settings
+    assert Settings.model_fields["health_os_lang"].default == "en"   # independent of local .env
+    monkeypatch.setattr(settings, "health_os_lang", "en")
+    hit = evaluate("potassium", 6.8, "mmol/L", THRESHOLDS)
+    assert hit.message.startswith("Critical potassium") and hit.message_uk.startswith("Критичний")
+
+
+def test_message_in_ukrainian_and_spanish():
+    assert evaluate("potassium", 6.8, "mmol/L", THRESHOLDS, lang="uk").message == \
+        "Критичний калій — до лікаря сьогодні."
+    assert evaluate("glucose", 2.0, "mmol/L", THRESHOLDS, lang="es").message.startswith(
+        "Glucosa crítica")
+
+
+def test_message_falls_back_safely():
+    from safety.critical_values import GENERIC, message_for
+    assert message_for("unknown_marker", None, "es") == GENERIC["es"]
+    assert message_for("unknown_marker", None, "uk") == GENERIC["uk"]
+    assert message_for("potassium", "x", "fr").startswith("Critical potassium")  # unknown → en
+
+
+def test_every_seeded_threshold_has_english_and_spanish():
+    from safety.critical_values import MESSAGES
+    from seed.data import CRITICAL_THRESHOLDS
+    for code, *_ in CRITICAL_THRESHOLDS:
+        assert {"en", "es"} <= set(MESSAGES.get(code, {})), code
