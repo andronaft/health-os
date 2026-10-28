@@ -29,6 +29,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   only "índice de masa corporal", bone/muscle/ventricular mass are excluded (#30).
 
 ### Added
+- `core/queries.py` — one read layer for the MCP tools and the coming browser UI: `observations`, `trend`, `timeline`, the per-user views, plus `markers` (latest value of every marker with its own range and counts) and `series` (chart points, each with its own reference range). The MCP tools now call it; their output is unchanged (#51).
 - `check_data_quality` — checks of the stored records, not of health: reference ranges that are
   swapped, empty or far narrower than the same marker's other ranges (typical recognition
   errors), lab values that jumped ≥5× from the previous value, approved numbers without a
