@@ -344,6 +344,92 @@ def get_anomalies(type_code: str = "", days: int = 90, z_threshold: float = 2.0)
                       default=str, ensure_ascii=False)
 
 
+def check_data_quality() -> str:
+    """Checks of the RECORDS (not of health): what to verify against the original documents.
+
+    - reference ranges that are swapped, zero-width, or much narrower than the same marker's
+      other ranges (relative width, so g/L vs g/dL doesn't matter) — usually a recognition error;
+    - lab values that jumped ≥5× from the previous value of the same marker;
+    - approved numbers without a canonical value (invisible to trends and critical checks);
+    - the review queue, and diagnoses still "active" after more than two years.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    with engine.connect() as conn:
+        uid = _user_id(conn)
+        if not uid:
+            return _no_user_error()
+        obs = conn.execute(
+            text("""SELECT id, type_code, category, effective_at, value_numeric, unit,
+                           value_canonical, canonical_unit, ref_min, ref_max
+                    FROM v_observations WHERE user_id=:u ORDER BY type_code, effective_at"""),
+            {"u": uid},
+        ).mappings().all()
+        pending = conn.execute(
+            text("""SELECT count(*) AS n, count(*) FILTER (WHERE unmapped) AS unmapped
+                    FROM v_observations_pending WHERE user_id=:u"""), {"u": uid},
+        ).mappings().one()
+        stale = conn.execute(
+            text("""SELECT diagnosis_name, diagnosed_at FROM v_diagnoses
+                    WHERE user_id=:u AND clinical_status='active'
+                      AND diagnosed_at < :cut ORDER BY diagnosed_at"""),
+            {"u": uid, "cut": (datetime.now(UTC) - timedelta(days=730)).date()},
+        ).mappings().all()
+
+    def rel_width(r):
+        lo, hi = float(r["ref_min"]), float(r["ref_max"])
+        mid = (lo + hi) / 2
+        return (hi - lo) / mid if mid > 0 else None
+
+    issues: list[dict] = []
+    by_code: dict[str, list] = {}
+    for r in obs:
+        by_code.setdefault(r["type_code"], []).append(r)
+    for code, rows in by_code.items():
+        ranged = [r for r in rows if r["ref_min"] is not None and r["ref_max"] is not None]
+        for r in ranged:
+            lo, hi = float(r["ref_min"]), float(r["ref_max"])
+            if lo >= hi:
+                issues.append({"kind": "range_swapped_or_empty", "type_code": code,
+                               "at": r["effective_at"], "range": [lo, hi], "unit": r["unit"],
+                               "id": r["id"]})
+        widths = [(r, rel_width(r)) for r in ranged if float(r["ref_min"]) < float(r["ref_max"])]
+        widths = [(r, w) for r, w in widths if w]
+        for r, w in widths:
+            # vs the widest other range: a lab that repeats the same wrong range on every
+            # report would otherwise make it look typical
+            widest = max((ow for o, ow in widths if o["id"] != r["id"]), default=None)
+            if widest and w < 0.25 * widest:
+                issues.append({"kind": "range_unusually_narrow", "type_code": code,
+                               "at": r["effective_at"],
+                               "range": [float(r["ref_min"]), float(r["ref_max"])],
+                               "unit": r["unit"], "id": r["id"],
+                               "detail": f"relative width {w:.2f}, other ranges of this marker "
+                                         f"up to {widest:.2f}"})
+        if rows[0]["category"] in ("lab", "hematology"):
+            vals = [r for r in rows if r["value_canonical"] is not None]
+            for prev, cur in zip(vals, vals[1:], strict=False):
+                a, b = float(prev["value_canonical"]), float(cur["value_canonical"])
+                if a > 0 and b > 0 and max(a, b) / min(a, b) >= 5:
+                    issues.append({"kind": "large_jump", "type_code": code,
+                                   "at": cur["effective_at"], "from": a, "to": b,
+                                   "unit": cur["canonical_unit"], "previous_at": prev["effective_at"],
+                                   "id": cur["id"]})
+    no_canonical = sum(1 for r in obs if r["value_numeric"] is not None
+                       and r["value_canonical"] is None)
+    return json.dumps({
+        "issues": issues,
+        "counts": {"observations": len(obs), "issues": len(issues),
+                   "approved_without_canonical": no_canonical,
+                   "pending_review": pending["n"], "pending_unmapped": pending["unmapped"],
+                   "active_diagnoses_older_than_2y": len(stale)},
+        "stale_active_diagnoses": [dict(d) for d in stale],
+        "note": ("Checks of the records, not of health: verify each item against the original "
+                 "document. A large jump or an odd range is often a recognition error, "
+                 "sometimes a real change."),
+    }, default=str, ensure_ascii=False)
+
+
 def get_screening_recommendations() -> str:
     """Screening calendar for the profile (deterministic, with age-gate and "you don't need this yet")."""
     from datetime import date

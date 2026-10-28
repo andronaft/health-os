@@ -29,6 +29,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   only "índice de masa corporal", bone/muscle/ventricular mass are excluded (#30).
 
 ### Added
+- `check_data_quality` — checks of the stored records, not of health: reference ranges that are
+  swapped, empty or far narrower than the same marker's other ranges (typical recognition
+  errors), lab values that jumped ≥5× from the previous value, approved numbers without a
+  canonical value, the review queue, and diagnoses still "active" after two years. Each item is
+  "verify against the original document".
+
 - `get_anomalies` — compares each marker's latest approved value with the user's own earlier
   values (mean ± SD of up to 90 previous values) and lists those beyond a z threshold. Uses the
   existing `analytics/baselines.py`, which no tool reached before. Markers with fewer than 5
