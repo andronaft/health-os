@@ -14,39 +14,14 @@ import json
 from sqlalchemy import text
 
 from analytics.screening import build_calendar
+from core import queries as q
 from core.db import engine as rw_engine
 from core.db import readonly_engine as engine
 from core.health_summary import build
-
-MAX_ROWS = 200
-AGG_THRESHOLD_DAYS = 90
-MAX_DAYS = 36500  # 100 years is "all time"; far larger windows overflow make_interval in Postgres
-
-
-def _days(days) -> int:
-    return max(0, min(int(days), MAX_DAYS))
-
-
-def _no_values_note(conn, uid, type_code: str) -> dict:
-    """An empty result for a code the user has no values for at all ("LDL", "cholesterol") read
-    exactly like "no data for this marker". Say which it is and offer the closest codes that do
-    have approved values."""
-    import difflib
-    codes = [r[0] for r in conn.execute(
-        text("SELECT DISTINCT type_code FROM v_observations WHERE user_id=:u"), {"u": uid})]
-    if type_code in codes:
-        return {"note": f"no approved values for “{type_code}” in this period"}
-    close = difflib.get_close_matches(type_code, codes, n=5, cutoff=0.5)
-    close += [c for c in codes if type_code and type_code in c and c not in close]
-    out = {"note": f"“{type_code}” has no approved values at all — check the type_code"}
-    if close:
-        out["did_you_mean"] = close[:5]
-    return out
-
-
-def _user_id(conn) -> str | None:
-    row = conn.execute(text("SELECT id FROM users LIMIT 1")).first()
-    return str(row[0]) if row else None
+from core.queries import AGG_THRESHOLD_DAYS, MAX_DAYS, MAX_ROWS  # noqa: F401 — re-exported
+from core.queries import clamp_days as _days
+from core.queries import no_values_note as _no_values_note
+from core.queries import user_id as _user_id
 
 
 def get_health_summary() -> str:
@@ -64,49 +39,12 @@ def get_health_summary() -> str:
 
 def query_observations(type_code: str, days: int = 365) -> str:
     """Values of a marker over a period. >90 days → weekly aggregation (min/avg/max)."""
-    type_code, days = (type_code or "").strip().lower(), _days(days)
     with engine.connect() as conn:
         uid = _user_id(conn)
         if not uid:
             return json.dumps({"error": "no user"})
-        if days > AGG_THRESHOLD_DAYS:
-            rows = conn.execute(
-                text(
-                    """
-                    SELECT date_trunc('week', effective_at)::date AS week,
-                           count(*) AS n,
-                           round(min(value_canonical)::numeric, 3) AS min,
-                           round(avg(value_canonical)::numeric, 3) AS avg,
-                           round(max(value_canonical)::numeric, 3) AS max
-                    FROM v_observations
-                    WHERE user_id=:u AND type_code=:c
-                      AND effective_at >= now() - make_interval(days => :d)
-                    GROUP BY 1 ORDER BY 1 DESC LIMIT :lim
-                    """
-                ),
-                {"u": uid, "c": type_code, "d": days, "lim": MAX_ROWS},
-            ).mappings().all()
-            out = {"type_code": type_code, "aggregation": "weekly",
-                   "buckets": [dict(r) for r in rows]}
-            if not rows:
-                out.update(_no_values_note(conn, uid, type_code))
-            return json.dumps(out, default=str, ensure_ascii=False)
-        rows = conn.execute(
-            text(
-                """
-                SELECT effective_at, value_numeric, unit, value_canonical, canonical_unit, status
-                FROM v_observations
-                WHERE user_id=:u AND type_code=:c
-                  AND effective_at >= now() - make_interval(days => :d)
-                ORDER BY effective_at DESC LIMIT :lim
-                """
-            ),
-            {"u": uid, "c": type_code, "d": days, "lim": MAX_ROWS},
-        ).mappings().all()
-        out = {"type_code": type_code, "rows": [dict(r) for r in rows]}
-        if not rows:
-            out.update(_no_values_note(conn, uid, type_code))
-        return json.dumps(out, default=str, ensure_ascii=False)
+        return json.dumps(q.observations(conn, uid, type_code, days), default=str,
+                          ensure_ascii=False)
 
 
 def query_food(days: int = 7, meal_type: str = "") -> str:
@@ -198,55 +136,39 @@ def list_meal_templates() -> str:
 
 
 def get_timeline(days: int = 3650) -> str:
-    days = _days(days)
     with engine.connect() as conn:
         uid = _user_id(conn)
         if not uid:
             return _no_user_error()
-        rows = conn.execute(
-            text(
-                """SELECT kind, at,
-                          COALESCE(title, CASE kind WHEN 'panel' THEN 'lab panel' ELSE kind END)
-                          AS title
-                   FROM health_timeline
-                   WHERE user_id=:u AND at >= now() - make_interval(days => :d)
-                   ORDER BY at DESC LIMIT :lim"""
-            ),
-            {"u": uid, "d": days, "lim": MAX_ROWS},
-        ).mappings().all()
-        return json.dumps([dict(r) for r in rows], default=str, ensure_ascii=False)
+        return json.dumps(q.timeline(conn, uid, days), default=str, ensure_ascii=False)
 
 
-def _simple_view(view: str) -> str:
+def _simple_view(name: str) -> str:
     with engine.connect() as conn:
         uid = _user_id(conn)
         if not uid:
             return _no_user_error()
-        rows = conn.execute(
-            text(f"SELECT * FROM {view} WHERE user_id=:u LIMIT :lim"),
-            {"u": uid, "lim": MAX_ROWS},
-        ).mappings().all()
-        return json.dumps([dict(r) for r in rows], default=str, ensure_ascii=False)
+        return json.dumps(q.view_rows(conn, uid, name), default=str, ensure_ascii=False)
 
 
 def get_medications() -> str:
-    return _simple_view("v_medications_current")
+    return _simple_view("medications")
 
 
 def get_diagnoses() -> str:
-    return _simple_view("v_diagnoses")
+    return _simple_view("diagnoses")
 
 
 def get_allergies() -> str:
-    return _simple_view("v_allergies")
+    return _simple_view("allergies")
 
 
 def get_habits() -> str:
-    return _simple_view("v_habits")
+    return _simple_view("habits")
 
 
 def list_pending_reviews() -> str:
-    return _simple_view("v_observations_pending")
+    return _simple_view("pending")
 
 
 
@@ -255,34 +177,11 @@ def _no_user_error() -> str:
 
 def get_trend(type_code: str, days: int = 1825) -> str:
     """Marker trend by Mann-Kendall (direction + significance) over approved values."""
-    from analytics.trends import trend as _trend
-
-    type_code, days = (type_code or "").strip().lower(), _days(days)
     with engine.connect() as conn:   # via the approved-view (readonly)
         uid = _user_id(conn)
         if not uid:
             return _no_user_error()
-        rows = conn.execute(
-            text(
-                """SELECT value_canonical, effective_at FROM (
-                     SELECT value_canonical, effective_at FROM v_observations
-                     WHERE user_id=:u AND type_code=:c AND value_canonical IS NOT NULL
-                       AND effective_at >= now() - make_interval(days => :d)
-                     ORDER BY effective_at DESC LIMIT 500
-                   ) recent ORDER BY effective_at ASC"""
-            ),
-            {"u": uid, "c": type_code, "d": days},
-        ).all()
-        missing = _no_values_note(conn, uid, type_code) if not rows else {}
-    values = [float(r[0]) for r in rows]
-    t = _trend(values, times=[r[1] for r in rows])
-    date_from = str(rows[0][1]) if rows else None
-    date_to = str(rows[-1][1]) if rows else None
-    return json.dumps({"type_code": type_code, "n": t.n, "direction": t.direction,
-                       "slope_per_year": (round(t.slope_per_year, 4)
-                                          if t.slope_per_year is not None else None),
-                       "detail": t.detail, "from": date_from, "to": date_to, **missing},
-                      ensure_ascii=False)
+        return json.dumps(q.trend(conn, uid, type_code, days), ensure_ascii=False)
 
 
 def get_anomalies(type_code: str = "", days: int = 90, z_threshold: float = 2.0) -> str:
