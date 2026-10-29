@@ -9,8 +9,12 @@ Connecting any MCP client — via an mcp config pointing to this command.
 """
 from __future__ import annotations
 
+import functools
+import json
+
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
+from sqlalchemy.exc import OperationalError
 
 from mcp_server import tools, write_tools
 from prompts.system_prompt import SYSTEM_PROMPT
@@ -21,6 +25,23 @@ mcp = MCPServer("health-os", instructions=SYSTEM_PROMPT)
 
 # Tool annotations let clients auto-allow reads and ask the user before writes. Approving a
 # staged panel turns unverified values into facts — marked destructive so clients confirm it.
+def _db_guard(fn):
+    """A database that isn't answering (Docker Desktop stopped, Postgres down) used to surface as
+    a bare "Error executing tool". Say what's wrong and how to fix it instead."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except OperationalError as e:
+            return json.dumps({
+                "error": "database unreachable",
+                "hint": "Postgres isn't answering. On a local install start Docker Desktop "
+                        "(container health_os_db) and retry.",
+                "detail": str(e.orig or e).splitlines()[0][:200],
+            }, ensure_ascii=False)
+    return wrapper
+
+
 READ = ToolAnnotations(read_only_hint=True, open_world_hint=False)
 WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False,
                         open_world_hint=False)
@@ -60,6 +81,7 @@ Examples:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def get_health_summary() -> str:
     """Deterministic health summary: profile, allergies (including unverified), active diagnoses,
     current medications, recency of exams. A guide — exact values via query_observations."""
@@ -67,6 +89,7 @@ def get_health_summary() -> str:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def query_observations(type_code: str, days: int = 365) -> str:
     """Values of a marker (e.g. 'cholesterol_total') over N days. >90 days → weekly
     aggregation min/avg/max. Only confirmed (approved) values."""
@@ -74,6 +97,7 @@ def query_observations(type_code: str, days: int = 365) -> str:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def get_timeline(days: int = 3650) -> str:
     """Chronology of the user's health events: diagnoses, lab panels, visits, medications,
     hospitalizations, vaccinations — newest first, at most 200 rows of {kind, at, title}.
@@ -84,6 +108,7 @@ def get_timeline(days: int = 3650) -> str:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def query_food(days: int = 7, meal_type: str = "") -> str:
     """Food diary entries for the last N days, newest first (max 200 meals): id (for
     update_meal / delete_meal), time, meal type, description, portion, glycemic index/load, symptoms and wellbeing after eating, plus the
@@ -95,6 +120,7 @@ def query_food(days: int = 7, meal_type: str = "") -> str:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def query_nutrition(days: int = 7) -> str:
     """Average daily intake of every logged nutrient over the last N days, with %RDA and a
     flag: "deficient" (<70% of the norm) or "excess" (above the safe upper limit). Averages are
@@ -107,6 +133,7 @@ def query_nutrition(days: int = 7) -> str:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def nutrition_report(days: int = 30) -> str:
     """Nutrition analytics over N days: top deficiencies/excesses (%RDA+flags) + food's link
     to wellbeing (average GI/sugar/sodium by wellbeing category). Association, not causation."""
@@ -114,12 +141,14 @@ def nutrition_report(days: int = 30) -> str:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def list_meal_templates() -> str:
     """Saved templates for frequent meals (for quick log_from_template)."""
     return tools.list_meal_templates()
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def get_medications() -> str:
     """Medications and supplements the user is currently taking (status "taking"): name, dose,
     unit, times per day, route, product type (prescription / otc / supplement / herbal).
@@ -130,6 +159,7 @@ def get_medications() -> str:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def get_diagnoses() -> str:
     """All recorded diagnoses with two independent status axes: clinical_status
     (active / resolved / …) and verification_status (confirmed / provisional / suspected /
@@ -140,6 +170,7 @@ def get_diagnoses() -> str:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def get_allergies() -> str:
     """All recorded allergies: allergen, reaction, severity and whether it is verified.
     Unverified allergies must still be treated as real (fail-safe) — never suggest an allergen
@@ -149,6 +180,7 @@ def get_allergies() -> str:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def get_habits() -> str:
     """Habits the user reported — smoking, alcohol, cannabis, vaping and similar: habit_type,
     status (current / former / never), frequency as said (e.g. "about once a week"), optional
@@ -160,6 +192,7 @@ def get_habits() -> str:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def list_pending_reviews() -> str:
     """Lab values that were staged (stage_lab_panel) but NOT yet approved by the user —
     marker, value, unit, date and status, each marked "PENDING — unverified". Never cite these as
@@ -171,6 +204,7 @@ def list_pending_reviews() -> str:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def search(query: str, limit: int = 8, days: int = 0) -> str:
     """Full-text search over document narratives (doctors' conclusions, immunogram
     interpretations, ultrasound descriptions). For questions like "what did the immunologist
@@ -180,6 +214,7 @@ def search(query: str, limit: int = 8, days: int = 0) -> str:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def get_anomalies(type_code: str = "", days: int = 90, z_threshold: float = 2.0) -> str:
     """Personal-baseline anomalies: for each marker whose latest approved value is within the
     last `days` (default 90), compares it with that marker's own earlier values (mean ± SD of up
@@ -191,6 +226,7 @@ def get_anomalies(type_code: str = "", days: int = 90, z_threshold: float = 2.0)
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def check_data_quality() -> str:
     """Checks of the stored RECORDS, not of health: reference ranges that are swapped, empty or
     much narrower than the same marker's other ranges (typical recognition errors); lab values
@@ -202,6 +238,7 @@ def check_data_quality() -> str:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def get_screening_recommendations() -> str:
     """Screening calendar for the user's profile (age-gate, "you don't need this yet").
     Statuses: due/overdue/up_to_date/not_yet. Requires a filled-in profile."""
@@ -209,6 +246,7 @@ def get_screening_recommendations() -> str:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def get_trend(type_code: str, days: int = 1825) -> str:
     """Statistical trend of one marker over time (Mann-Kendall test with tie correction) on
     approved values: direction increasing / decreasing / no_trend with z, p-value, and
@@ -221,6 +259,7 @@ def get_trend(type_code: str, days: int = 1825) -> str:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def prepare_doctor_visit(specialty: str = "") -> str:
     """One-call briefing to take to a doctor: the deterministic health summary, the latest
     abnormal approved values (high/low/critical, up to 15), screenings that are due or overdue,
@@ -231,6 +270,7 @@ def prepare_doctor_visit(specialty: str = "") -> str:
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def get_weekly_report() -> str:
     """Deterministic report for the last 7 days: newly added values, abnormal approved values,
     top nutrient deficiencies/excesses from the food log, and system health (review-queue size,
@@ -252,12 +292,14 @@ get_trend, query_food…) when they fit.
 # The description is built from the schema hint, so it is passed explicitly: a concatenated
 # string is not a docstring, and the tool used to reach clients with no description at all.
 @mcp.tool(annotations=READ, description=_SQL_QUERY_DESCRIPTION)
+@_db_guard
 def sql_query(sql: str) -> str:
     return tools.sql_query(sql)
 
 
 # ---------------------------------------------------------------- SAFETY tools
 @mcp.tool(annotations=READ)
+@_db_guard
 def check_medication_safety(paracetamol_products: list[dict] | None = None,
                             taking_biotin: bool | None = None,
                             planned_tests: list[str] | None = None) -> str:
@@ -271,6 +313,7 @@ def check_medication_safety(paracetamol_products: list[dict] | None = None,
 
 
 @mcp.tool(annotations=READ)
+@_db_guard
 def crisis_resources(message: str = "") -> str:
     """Call IMMEDIATELY on any sign of crisis, suicidal thoughts or self-harm. Returns a fixed
     response with hotlines and the user's trusted contact. Reply with it as is — no analytics."""
@@ -285,6 +328,7 @@ def health_assistant() -> str:
 
 # ---------------------------------------------------------------- WRITE tools
 @mcp.tool(annotations=WRITE_IDEMPOTENT)
+@_db_guard
 def set_profile(date_of_birth: str, sex: str, blood_type: str = "",
                 height_cm: float | None = None, emergency_contact: str = "") -> str:
     """Create or update the user's profile. Needed by age/sex-dependent features: reference
@@ -295,6 +339,7 @@ def set_profile(date_of_birth: str, sex: str, blood_type: str = "",
 
 
 @mcp.tool(annotations=WRITE)
+@_db_guard
 def record_allergy(allergen: str, reaction: str = "", severity: str = "",
                    verified: bool = False, allergen_type: str = "") -> str:
     """Add an allergy the user reports (stored immediately as approved, with manual provenance).
@@ -306,6 +351,7 @@ def record_allergy(allergen: str, reaction: str = "", severity: str = "",
 
 
 @mcp.tool(annotations=WRITE)
+@_db_guard
 def record_diagnosis(diagnosis_name: str, diagnosed_at: str, icd10_code: str = "",
                      clinical_status: str = "active",
                      verification_status: str = "confirmed", severity: str = "") -> str:
@@ -320,6 +366,7 @@ def record_diagnosis(diagnosis_name: str, diagnosed_at: str, icd10_code: str = "
 
 
 @mcp.tool(annotations=WRITE)
+@_db_guard
 def record_medication(medication_name: str, start_date: str, dose_amount: float | None = None,
                       dose_unit: str = "", times_per_day: float | None = None,
                       product_type: str = "prescription", prescribed_for: str = "",
@@ -338,6 +385,7 @@ def record_medication(medication_name: str, start_date: str, dose_amount: float 
 
 
 @mcp.tool(annotations=WRITE_IDEMPOTENT)
+@_db_guard
 def update_medication(medication_id: str, medication_name: str = "",
                       dose_amount: float | None = None, dose_unit: str = "",
                       times_per_day: float | None = None, route: str = "",
@@ -355,6 +403,7 @@ def update_medication(medication_id: str, medication_name: str = "",
 
 
 @mcp.tool(annotations=WRITE_IDEMPOTENT)
+@_db_guard
 def stop_medication(medication_id: str, end_date: str = "", stop_reason: str = "",
                     side_effects: str = "") -> str:
     """Record that the user no longer takes a medication: medication_id from get_medications,
@@ -367,6 +416,7 @@ def stop_medication(medication_id: str, end_date: str = "", stop_reason: str = "
 
 
 @mcp.tool(annotations=WRITE)
+@_db_guard
 def record_habit(habit_type: str, status: str = "current", frequency: str = "",
                  start_date: str = "", end_date: str = "", notes: str = "",
                  cigarettes_per_day: int | None = None, smoking_years: int | None = None,
@@ -384,6 +434,7 @@ def record_habit(habit_type: str, status: str = "current", frequency: str = "",
 
 
 @mcp.tool(annotations=WRITE_IDEMPOTENT)
+@_db_guard
 def update_habit(habit_id: str, habit_type: str = "", status: str = "", frequency: str = "",
                  start_date: str = "", end_date: str = "", notes: str = "",
                  cigarettes_per_day: int | None = None, smoking_years: int | None = None,
@@ -398,6 +449,7 @@ def update_habit(habit_id: str, habit_type: str = "", status: str = "", frequenc
 
 
 @mcp.tool(annotations=WRITE)
+@_db_guard
 def log_meal(description: str, meal_type: str = "", eaten_at: str = "", portion: str = "",
              nutrients: dict | None = None, glycemic_index: int | None = None,
              glycemic_load: float | None = None, symptoms: str = "", wellbeing: str = "",
@@ -419,6 +471,7 @@ def log_meal(description: str, meal_type: str = "", eaten_at: str = "", portion:
 
 
 @mcp.tool(annotations=WRITE_IDEMPOTENT)
+@_db_guard
 def save_meal_template(name: str, meal_type: str = "", description: str = "",
                        nutrients: dict | None = None, glycemic_index: int | None = None) -> str:
     """Save (or overwrite) a reusable template for a meal eaten often, so it can later be logged
@@ -430,6 +483,7 @@ def save_meal_template(name: str, meal_type: str = "", description: str = "",
 
 
 @mcp.tool(annotations=WRITE_IDEMPOTENT)
+@_db_guard
 def update_meal(food_log_id: str, eaten_at: str = "", meal_type: str = "",
                 description: str = "", portion: str = "", nutrients: dict | None = None,
                 glycemic_index: int | None = None, glycemic_load: float | None = None,
@@ -445,6 +499,7 @@ def update_meal(food_log_id: str, eaten_at: str = "", meal_type: str = "",
 
 
 @mcp.tool(annotations=DELETE)
+@_db_guard
 def delete_meal(food_log_id: str) -> str:
     """Remove a meal from the food diary and the nutrient totals — only when the user says it
     was logged by mistake or twice (food_log_id from query_food). To fix a time, portion or
@@ -453,6 +508,7 @@ def delete_meal(food_log_id: str) -> str:
 
 
 @mcp.tool(annotations=WRITE)
+@_db_guard
 def log_from_template(name: str, portion_factor: float = 1.0, eaten_at: str = "",
                       wellbeing: str = "", symptoms: str = "") -> str:
     """Log a meal from a saved template in one call: copies the template's nutrients multiplied
@@ -463,6 +519,7 @@ def log_from_template(name: str, portion_factor: float = 1.0, eaten_at: str = ""
 
 
 @mcp.tool(annotations=STAGE)
+@_db_guard
 def stage_lab_panel(panel_date: str, rows: list[dict], panel_type: str = "",
                     facility: str = "") -> str:
     """Stage an extracted lab panel (PENDING). panel_date: YYYY-MM-DD from the report. rows: a
@@ -476,6 +533,7 @@ def stage_lab_panel(panel_date: str, rows: list[dict], panel_type: str = "",
 
 
 @mcp.tool(annotations=STAGE)
+@_db_guard
 def map_pending_observation(observation_id: str, type_code: str,
                             learn_synonym: bool = True) -> str:
     """Assign a marker type (observation_types.code, e.g. "lymphocytes_abs") to a pending row
@@ -487,6 +545,7 @@ def map_pending_observation(observation_id: str, type_code: str,
 
 
 @mcp.tool(annotations=APPROVE)
+@_db_guard
 def approve_staged_source(source_id: str, allow_missing_canonical: bool = False) -> str:
     """Approve a staged panel (pending→approved). ONLY on an explicit instruction from the
     user in the current message — do not call right after stage_lab_panel.
