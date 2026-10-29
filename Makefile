@@ -1,4 +1,4 @@
-.PHONY: start stop restart logs demo demo-down test test-unit test-integration lint
+.PHONY: start stop restart logs demo demo-down ui test test-unit test-integration lint
 
 start:
 	@docker compose up -d
@@ -21,6 +21,10 @@ restart: stop start
 
 logs:
 	@docker compose logs -f
+
+# Browser UI on 127.0.0.1 only (read-only); opens a tab with this run's session link.
+ui:
+	@uv run python -m web
 
 test:
 	@uv run pytest -q
