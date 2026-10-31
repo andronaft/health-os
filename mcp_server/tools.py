@@ -516,9 +516,13 @@ def crisis_resources(message: str = "") -> str:
     contact from the profile, if set."""
     from safety.crisis import crisis_response, is_crisis
 
-    with rw_engine.connect() as conn:  # user_profile is not exposed to the readonly role
-        contact = conn.execute(
-            text("SELECT emergency_contact FROM user_profile LIMIT 1")).scalar()
+    contact = None
+    try:
+        with rw_engine.connect() as conn:  # user_profile is not exposed to the readonly role
+            contact = conn.execute(
+                text("SELECT emergency_contact FROM user_profile LIMIT 1")).scalar()
+    except Exception:  # noqa: BLE001 — the crisis response must never depend on the database
+        contact = None
     return json.dumps({
         "detected_by_keywords": is_crisis(message) if message else None,
         "response": crisis_response(contact),
