@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     crisis_country: str = "UA"
     # Language of the system's own safety messages (critical values): en / uk / es.
     health_os_lang: str = "en"
+    # Browser UI (`make ui`): always bound to 127.0.0.1, only the port is configurable.
+    ui_port: int = 8765
 
 
 settings = Settings()
