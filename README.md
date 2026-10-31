@@ -86,6 +86,19 @@ local model can use it. Verified so far: the server itself with the official MCP
 (CI + the Docker demo). Not yet verified end-to-end with a local model — see
 [#9](https://github.com/andronaft/health-os/issues/9); reports welcome.
 
+### Browser UI (preview)
+
+```bash
+make ui                               # or: .venv/bin/python -m web [--port N] [--no-browser]
+```
+
+Starts a local, read-only web page on `127.0.0.1:8765` (port: `UI_PORT` in `.env`) and opens it
+with this run's session link. Only this machine can reach it: the server listens on 127.0.0.1,
+refuses requests with a foreign `Host`, and its API answers only GET requests that carry the
+session token. So far the page only shows whether it is connected to the server and the
+health-os version — the data pages come in 0.4.0
+([milestone](https://github.com/andronaft/health-os/milestone/1)).
+
 ## How it works
 
 <p align="center">

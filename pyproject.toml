@@ -16,10 +16,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# browser UI (`make ui`); both already come with `mcp`, declared so the UI doesn't depend on that
+ui = [
+    "starlette>=0.48",
+    "uvicorn>=0.31",
+]
 dev = [
     "ruff>=0.5",
     "pytest>=8.2",
     "pytest-cov>=5.0",
+    "httpx>=0.27",  # Starlette's TestClient
 ]
 
 [tool.ruff]
@@ -42,4 +48,4 @@ build-backend = "hatchling.build"
 packages = ["core", "seed"]
 
 [tool.coverage.run]
-source = ["core", "safety", "analytics", "ingestion", "mcp_server", "seed", "worker", "prompts"]
+source = ["core", "safety", "analytics", "ingestion", "mcp_server", "seed", "worker", "prompts", "web"]
