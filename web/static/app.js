@@ -4,13 +4,16 @@ const TOKEN_KEY = "health-os-token";
 const TOKEN_HEADER = "X-Health-OS-Token";
 
 // `make ui` opens http://127.0.0.1:PORT/#token=… — the fragment is never sent to the server
-// or written to its log. Keep the token for this tab only and take it out of the address bar.
+// or written to its log. Take it out of the address bar and keep it in localStorage, so other
+// tabs and bookmarks of this UI work while this run lasts. localStorage belongs to one origin,
+// port included (a cookie would also go to every other server on 127.0.0.1); a token left there
+// from an earlier run is useless, since every run makes a new one.
 function takeToken() {
   const params = new URLSearchParams(location.hash.slice(1));
   const fromLink = params.get("token");
   if (fromLink) {
     try {
-      sessionStorage.setItem(TOKEN_KEY, fromLink);
+      localStorage.setItem(TOKEN_KEY, fromLink);
     } catch {
       // storage blocked: the token still works until this page is reloaded
     }
@@ -20,28 +23,35 @@ function takeToken() {
     return fromLink;
   }
   try {
-    return sessionStorage.getItem(TOKEN_KEY) || "";
+    return localStorage.getItem(TOKEN_KEY) || "";
   } catch {
     return "";
   }
 }
 
-const token = takeToken();
+let token = takeToken();
 
 class ApiError extends Error {
-  constructor(status) {
-    super(`HTTP ${status}`);
+  constructor(status, message = `HTTP ${status}`) {
+    super(message);
     this.status = status;
   }
 }
+
+const TIMEOUT_MS = 10000;
 
 async function api(path) {
   const res = await fetch(`/api/v1/${path}`, {
     headers: token ? { [TOKEN_HEADER]: token } : {},
     cache: "no-store",
+    signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!res.ok) throw new ApiError(res.status);
-  return res.json();
+  try {
+    return await res.json();
+  } catch {
+    throw new ApiError(res.status, `HTTP ${res.status}, not JSON`);
+  }
 }
 
 function explain(err) {
@@ -49,6 +59,7 @@ function explain(err) {
     return "the session token is missing or out of date. Open the link printed by `make ui`.";
   }
   if (err instanceof ApiError) return `unexpected response from the server (${err.message}).`;
+  // network error or timeout
   return "the server is not responding. Is `make ui` still running?";
 }
 
@@ -56,7 +67,7 @@ async function showStatus() {
   const el = document.getElementById("status");
   try {
     const health = await api("health");
-    if (!health.ok) throw new Error("not ok");
+    if (!health.ok) throw new ApiError(200, "health check not ok");
     el.textContent = `connected · version ${health.version}`;
     el.dataset.state = "ok";
   } catch (err) {
@@ -66,3 +77,18 @@ async function showStatus() {
 }
 
 showStatus();
+// pasting a new `make ui` link into an open tab changes only the fragment: no reload
+window.addEventListener("hashchange", () => {
+  token = takeToken();
+  showStatus();
+});
+// a new link opened in another tab (after `make ui` was restarted) reaches this one too
+window.addEventListener("storage", (e) => {
+  if (e.key !== TOKEN_KEY || !e.newValue || e.newValue === token) return;
+  token = e.newValue;
+  showStatus();
+});
+// a tab left open after `make ui` stopped must not keep saying "connected"
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") showStatus();
+});

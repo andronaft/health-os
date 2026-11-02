@@ -61,7 +61,8 @@ jobs:
           enable-cache: true
 
       - name: Install (locked)
-        run: uv sync --locked --extra dev
+        # `ui`: tests/test_web.py needs what the browser UI declares, not what mcp happens to pull in
+        run: uv sync --locked --extra dev --extra ui
 
       - name: Unit tests
         run: uv run python -m pytest -q -m "not integration" --cov --cov-report=

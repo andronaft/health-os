@@ -9,7 +9,9 @@ Health data, so the server is strict even though it only listens on 127.0.0.1:
 """
 from __future__ import annotations
 
+import functools
 import hmac
+import tomllib
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -20,7 +22,8 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-STATIC = Path(__file__).resolve().parent / "static"
+ROOT = Path(__file__).resolve().parent.parent
+STATIC = ROOT / "web" / "static"
 TOKEN_HEADER = "x-health-os-token"
 ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
 SECURITY_HEADERS = {
@@ -31,11 +34,16 @@ SECURITY_HEADERS = {
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
     "x-frame-options": "DENY",
+    # other sites can't load our files as subresources (and so can't tell the UI is running)
+    "cross-origin-resource-policy": "same-origin",
+    "cross-origin-opener-policy": "same-origin",
 }
 
 
 class SecurityHeaders:
-    """Adds SECURITY_HEADERS to every response; API responses are never cached."""
+    """Adds SECURITY_HEADERS to every response. API responses are never cached; pages and static
+    files are revalidated on every load (ETag → 304), so an edited or updated file is never served
+    stale from the browser cache — there is no build step to give them hashed names."""
 
     def __init__(self, app):
         self.app = app
@@ -48,8 +56,8 @@ class SecurityHeaders:
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
                 extra = dict(SECURITY_HEADERS)
-                if scope["path"].startswith("/api/"):
-                    extra["cache-control"] = "no-store"
+                extra["cache-control"] = ("no-store" if scope["path"].startswith("/api/")
+                                          else "no-cache")
                 headers += [(k.encode(), v.encode()) for k, v in extra.items()]
                 message = {**message, "headers": headers}
             await send(message)
@@ -72,7 +80,15 @@ class RequireToken:
         await self.app(scope, receive, send)
 
 
+@functools.cache
 def _version() -> str:
+    # pyproject.toml first: the UI runs from a checkout (the wheel doesn't package web/), where
+    # installed metadata is stale until the next `uv sync` and the Docker image has none at all
+    try:
+        with open(ROOT / "pyproject.toml", "rb") as f:
+            return tomllib.load(f)["project"]["version"]
+    except (OSError, KeyError, tomllib.TOMLDecodeError):
+        pass
     try:
         return version("health-os")
     except PackageNotFoundError:
@@ -96,7 +112,7 @@ def create_app(token: str) -> Starlette:
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]
     return Starlette(routes=routes, middleware=[
+        Middleware(SecurityHeaders),  # outermost, so the Host check's 400 gets the headers too
         Middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS, www_redirect=False),
-        Middleware(SecurityHeaders),
         Middleware(RequireToken, token=token),
     ])
