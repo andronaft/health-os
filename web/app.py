@@ -9,7 +9,9 @@ Health data, so the server is strict even though it only listens on 127.0.0.1:
 """
 from __future__ import annotations
 
+import functools
 import hmac
+import tomllib
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -20,7 +22,8 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-STATIC = Path(__file__).resolve().parent / "static"
+ROOT = Path(__file__).resolve().parent.parent
+STATIC = ROOT / "web" / "static"
 TOKEN_HEADER = "x-health-os-token"
 ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
 SECURITY_HEADERS = {
@@ -77,7 +80,15 @@ class RequireToken:
         await self.app(scope, receive, send)
 
 
+@functools.cache
 def _version() -> str:
+    # pyproject.toml first: the UI runs from a checkout (the wheel doesn't package web/), where
+    # installed metadata is stale until the next `uv sync` and the Docker image has none at all
+    try:
+        with open(ROOT / "pyproject.toml", "rb") as f:
+            return tomllib.load(f)["project"]["version"]
+    except (OSError, KeyError, tomllib.TOMLDecodeError):
+        pass
     try:
         return version("health-os")
     except PackageNotFoundError:

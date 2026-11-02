@@ -1,14 +1,20 @@
 """web/: the local browser UI server — Host check, session token, CSP, GET only (#50)."""
 import re
+import shutil
 import socket
+import stat
 import sys
+import tomllib
+from importlib.metadata import PackageNotFoundError
+from pathlib import Path
 
 import pytest
 import uvicorn
 from starlette.testclient import TestClient
 
 import web.__main__
-from web.app import STATIC, create_app
+import web.app
+from web.app import ROOT, STATIC, create_app
 
 BASE = "http://127.0.0.1:8765"
 
@@ -45,6 +51,22 @@ def test_api_needs_the_session_token(client):
     r = client.get("/api/v1/health", headers={"X-Health-OS-Token": "t"})
     assert r.status_code == 200 and r.json()["ok"] is True and r.json()["version"]
     assert r.headers["cache-control"] == "no-store"
+
+
+def test_version_comes_from_pyproject(monkeypatch, client):
+    # installed metadata lags behind until `uv sync`, and the Docker image has none at all
+    def not_installed(name):
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr(web.app, "version", not_installed)
+    web.app._version.cache_clear()
+    with open(ROOT / "pyproject.toml", "rb") as f:
+        expected = tomllib.load(f)["project"]["version"]
+    try:
+        r = client.get("/api/v1/health", headers={"X-Health-OS-Token": "t"})
+        assert r.json()["version"] == expected
+    finally:
+        web.app._version.cache_clear()
 
 
 def test_api_errors_are_not_cached_either(client):
@@ -136,3 +158,28 @@ def test_bad_port_is_a_usage_error(monkeypatch, port):
     with pytest.raises(SystemExit) as exc:
         web.__main__.main()
     assert exc.value.code == 2  # argparse, not an OverflowError traceback
+
+
+def test_browser_gets_the_link_directly_on_macos(monkeypatch):
+    opened = []
+    monkeypatch.setattr(web.__main__.webbrowser, "open", opened.append)
+    monkeypatch.setattr(sys, "platform", "darwin")  # osascript reads the URL from stdin
+    web.__main__.open_browser("http://127.0.0.1:1/#token=secret")
+    assert opened == ["http://127.0.0.1:1/#token=secret"]
+
+
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+def test_elsewhere_the_token_stays_off_the_command_line(monkeypatch, platform):
+    # a browser started with the URL as an argument shows the token to every user in `ps`
+    opened = []
+    monkeypatch.setattr(web.__main__.webbrowser, "open", opened.append)
+    monkeypatch.setattr(sys, "platform", platform)
+    url = "http://127.0.0.1:1/#token=secret"
+    web.__main__.open_browser(url)
+    [arg] = opened
+    assert arg.startswith("file://") and "secret" not in arg
+    page = Path(arg.removeprefix("file://"))
+    assert f'content="0;url={url}"' in page.read_text()
+    assert stat.S_IMODE(page.stat().st_mode) == 0o600
+    assert stat.S_IMODE(page.parent.stat().st_mode) == 0o700
+    shutil.rmtree(page.parent)

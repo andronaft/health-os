@@ -4,13 +4,16 @@ const TOKEN_KEY = "health-os-token";
 const TOKEN_HEADER = "X-Health-OS-Token";
 
 // `make ui` opens http://127.0.0.1:PORT/#token=… — the fragment is never sent to the server
-// or written to its log. Keep the token for this tab only and take it out of the address bar.
+// or written to its log. Take it out of the address bar and keep it in localStorage, so other
+// tabs and bookmarks of this UI work while this run lasts. localStorage belongs to one origin,
+// port included (a cookie would also go to every other server on 127.0.0.1); a token left there
+// from an earlier run is useless, since every run makes a new one.
 function takeToken() {
   const params = new URLSearchParams(location.hash.slice(1));
   const fromLink = params.get("token");
   if (fromLink) {
     try {
-      sessionStorage.setItem(TOKEN_KEY, fromLink);
+      localStorage.setItem(TOKEN_KEY, fromLink);
     } catch {
       // storage blocked: the token still works until this page is reloaded
     }
@@ -20,7 +23,7 @@ function takeToken() {
     return fromLink;
   }
   try {
-    return sessionStorage.getItem(TOKEN_KEY) || "";
+    return localStorage.getItem(TOKEN_KEY) || "";
   } catch {
     return "";
   }
@@ -77,6 +80,12 @@ showStatus();
 // pasting a new `make ui` link into an open tab changes only the fragment: no reload
 window.addEventListener("hashchange", () => {
   token = takeToken();
+  showStatus();
+});
+// a new link opened in another tab (after `make ui` was restarted) reaches this one too
+window.addEventListener("storage", (e) => {
+  if (e.key !== TOKEN_KEY || !e.newValue || e.newValue === token) return;
+  token = e.newValue;
   showStatus();
 });
 // a tab left open after `make ui` stopped must not keep saying "connected"
