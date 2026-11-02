@@ -4,6 +4,7 @@ import socket
 import sys
 
 import pytest
+import uvicorn
 from starlette.testclient import TestClient
 
 import web.__main__
@@ -50,11 +51,31 @@ def test_api_errors_are_not_cached_either(client):
     assert client.get("/api/v1/health").headers["cache-control"] == "no-store"
 
 
+def test_pages_and_static_files_are_revalidated(client):
+    # no build step, no hashed file names: without this an edited or updated app.js is served
+    # stale from the browser cache for hours (heuristic freshness from Last-Modified)
+    assert client.get("/").headers["cache-control"] == "no-cache"
+    r = client.get("/static/app.js")
+    assert r.headers["cache-control"] == "no-cache"
+    again = client.get("/static/app.js", headers={"If-None-Match": r.headers["etag"]})
+    assert again.status_code == 304
+
+
+def test_other_sites_cannot_load_our_files(client):
+    for path in ("/", "/static/app.js", "/static/styles.css", "/api/v1/health"):
+        h = client.get(path).headers
+        assert h["cross-origin-resource-policy"] == "same-origin", path
+        assert h["cross-origin-opener-policy"] == "same-origin", path
+
+
 @pytest.mark.parametrize("base", ["http://evil.example", "http://127.0.0.1.evil.example:8765"])
 def test_foreign_host_is_rejected(base):
     # DNS rebinding: another site's name pointed at 127.0.0.1 arrives with its own Host
     c = TestClient(create_app("t"), base_url=base)
-    assert c.get("/").status_code == 400
+    r = c.get("/")
+    assert r.status_code == 400
+    assert "default-src 'self'" in r.headers["content-security-policy"]  # headers on every reply
+    assert r.headers["x-content-type-options"] == "nosniff"
     assert c.get("/api/v1/health", headers={"X-Health-OS-Token": "t"}).status_code == 400
 
 
@@ -87,3 +108,31 @@ def test_busy_port_exits_before_the_link_is_shown(monkeypatch, capsys):
             web.__main__.main()
     assert exc.value.code != 0
     assert "token=" not in capsys.readouterr().out
+
+
+def test_ctrl_c_exits_quietly_and_the_link_has_the_real_port(monkeypatch, capsys):
+    seen = {}
+
+    def ctrl_c(self, sockets=None):
+        seen["config"] = self.config
+        for s in sockets:
+            s.close()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(uvicorn.Server, "run", ctrl_c)
+    monkeypatch.setattr(sys, "argv", ["web", "--port", "0", "--no-browser"])
+    try:
+        web.__main__.main()
+    except KeyboardInterrupt:  # pytest would take it as the user aborting the whole run
+        pytest.fail("Ctrl+C escaped main(): the user sees a traceback")
+    port = int(re.search(r"http://127\.0\.0\.1:(\d+)/#token=", capsys.readouterr().out)[1])
+    assert port > 0  # --port 0: the port actually bound, not ":0"
+    assert seen["config"].server_header is False
+
+
+@pytest.mark.parametrize("port", ["70000", "-1", "abc"])
+def test_bad_port_is_a_usage_error(monkeypatch, port):
+    monkeypatch.setattr(sys, "argv", ["web", "--port", port, "--no-browser"])
+    with pytest.raises(SystemExit) as exc:
+        web.__main__.main()
+    assert exc.value.code == 2  # argparse, not an OverflowError traceback
