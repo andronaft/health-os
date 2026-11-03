@@ -18,6 +18,7 @@ from seed.data import (
     SYNONYMS,
     UNIT_CONVERSIONS,
 )
+from seed.names_es import NUTRIENT_NAMES_ES, OBSERVATION_NAMES_ES
 
 
 def ensure_seed_user(conn) -> str:
@@ -34,25 +35,39 @@ def load() -> None:
         ensure_seed_user(conn)
 
         # observation_types
-        for code, loinc, name_uk, name_en, cat, specimen, vkind, cunit, molar in OBSERVATION_TYPES:
+        for code, loinc, _uk, _en, cat, specimen, vkind, cunit, molar in OBSERVATION_TYPES:
             conn.execute(
                 text(
                     """
                     INSERT INTO observation_types
-                        (code, loinc_code, name_uk, name_en, category, specimen,
+                        (code, loinc_code, category, specimen,
                          value_kind, canonical_unit, molar_mass)
-                    VALUES (:code, :loinc, :name_uk, :name_en, :cat, :specimen,
-                            :vkind, :cunit, :molar)
+                    VALUES (:code, :loinc, :cat, :specimen, :vkind, :cunit, :molar)
                     ON CONFLICT (code) DO NOTHING
                     """
                 ),
-                dict(code=code, loinc=loinc, name_uk=name_uk, name_en=name_en, cat=cat,
-                     specimen=specimen, vkind=vkind, cunit=cunit, molar=molar),
+                dict(code=code, loinc=loinc, cat=cat, specimen=specimen, vkind=vkind,
+                     cunit=cunit, molar=molar),
             )
 
         # code -> type_id
         rows = conn.execute(text("SELECT id, code FROM observation_types")).all()
         type_id = {code: tid for tid, code in rows}
+
+        # marker names per language
+        for code, _loinc, name_uk, name_en, *_ in OBSERVATION_TYPES:
+            for lang, name in (("uk", name_uk), ("en", name_en),
+                               ("es", OBSERVATION_NAMES_ES[code])):
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO observation_type_names (type_id, lang, name)
+                        VALUES (:tid, :lang, :name)
+                        ON CONFLICT (type_id, lang) DO NOTHING
+                        """
+                    ),
+                    dict(tid=type_id[code], lang=lang, name=name),
+                )
 
         # synonyms (seed)
         for code, syns in SYNONYMS.items():
@@ -130,21 +145,31 @@ def load() -> None:
 
         # nutrient_types (food-log reference; RDAs are updated)
         for code, name_uk, name_en, unit, cat, rda, upper, sort in NUTRIENT_TYPES:
-            conn.execute(
+            nid = conn.execute(
                 text(
                     """
                     INSERT INTO nutrient_types
-                        (code, name_uk, name_en, unit, category, rda, upper_limit, sort_order)
-                    VALUES (:code, :name_uk, :name_en, :unit, :cat, :rda, :upper, :sort)
+                        (code, unit, category, rda, upper_limit, sort_order)
+                    VALUES (:code, :unit, :cat, :rda, :upper, :sort)
                     ON CONFLICT (code) DO UPDATE SET
-                        name_uk=EXCLUDED.name_uk, name_en=EXCLUDED.name_en, unit=EXCLUDED.unit,
-                        category=EXCLUDED.category, rda=EXCLUDED.rda,
+                        unit=EXCLUDED.unit, category=EXCLUDED.category, rda=EXCLUDED.rda,
                         upper_limit=EXCLUDED.upper_limit, sort_order=EXCLUDED.sort_order
+                    RETURNING id
                     """
                 ),
-                dict(code=code, name_uk=name_uk, name_en=name_en, unit=unit, cat=cat,
-                     rda=rda, upper=upper, sort=sort),
-            )
+                dict(code=code, unit=unit, cat=cat, rda=rda, upper=upper, sort=sort),
+            ).scalar()
+            for lang, name in (("uk", name_uk), ("en", name_en), ("es", NUTRIENT_NAMES_ES[code])):
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO nutrient_type_names (nutrient_id, lang, name)
+                        VALUES (:nid, :lang, :name)
+                        ON CONFLICT (nutrient_id, lang) DO UPDATE SET name=EXCLUDED.name
+                        """
+                    ),
+                    dict(nid=nid, lang=lang, name=name),
+                )
 
         # qualitative_values + synonyms (idempotent)
         for canonical, (rank, syns) in QUALITATIVE.items():

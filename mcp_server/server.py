@@ -60,7 +60,8 @@ _SCHEMA_HINT = """
 Only READ-ONLY views are available (approved + not deleted):
   v_observations(id, user_id, type_code, name_uk, category, specimen, effective_at,
                  value_numeric, comparator, value_text, unit, value_canonical,
-                 canonical_unit, ref_min, ref_max, status, result_status, context, panel_id)
+                 canonical_unit, ref_min, ref_max, status, result_status, context, panel_id,
+                 loinc_code, facility)
   v_observations_pending(... , review_status, review_note, raw_name, unmapped)  -- NOT fact, review only
   v_medications_current(id, medication_name, dose_amount, dose_unit, times_per_day, ...)
   v_diagnoses(id, diagnosed_at, diagnosis_name, icd10_code, clinical_status, verification_status)
@@ -72,6 +73,8 @@ Only READ-ONLY views are available (approved + not deleted):
   v_food_nutrients(food_log_id, user_id, eaten_at, meal_type, nutrient_code, name_uk,
                    category, unit, amount, rda, upper_limit)  -- nutrients per meal
   v_meal_templates(id, user_id, name, meal_type, description, nutrients, glycemic_index)
+  v_observation_type_names(type_code, lang, name)  -- marker names: lang = uk/en/es
+  v_nutrient_type_names(nutrient_code, lang, name)
   health_timeline(kind, user_id, id, at, title)
 Examples:
   SELECT type_code, effective_at, value_canonical FROM v_observations
