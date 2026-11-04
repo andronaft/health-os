@@ -11,6 +11,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   and Spanish available through `HEALTH_OS_LANG` (`en` / `uk` / `es`). They were Ukrainian
   only, so an English-speaking user got the system's most important message in a language
   they may not read (#32).
+- Marker and nutrient names moved from the `name_uk` / `name_en` columns into
+  `observation_type_names` and `nutrient_type_names` (one row per language), and the whole
+  catalog now has Spanish names. The read-only role reads them through
+  `v_observation_type_names` and `v_nutrient_type_names`. `v_observations` gains `loinc_code` and
+  `facility` and, like the other views, keeps `name_uk`. After `alembic upgrade head`, run
+  `python -m seed.load` to get the Spanish names. Your own scripts that read or write
+  `observation_types.name_uk` need to use the new tables (#52).
 
 ### Fixed
 - With the database unreachable (e.g. Docker Desktop stopped), `crisis_resources` failed instead of returning its fixed response; it no longer depends on the database. Every other tool now answers "database unreachable" with a hint instead of a bare "Error executing tool".

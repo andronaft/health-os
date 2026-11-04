@@ -74,10 +74,10 @@ def test_personal_records_are_not_anomalies():
     with engine.begin() as conn:
         uid = get_or_create_user(conn)
         # Garmin personal records come from private importers, so the seed has none: add one
-        tid = conn.execute(text("""INSERT INTO observation_types (code, name_uk, category,
+        tid = conn.execute(text("""INSERT INTO observation_types (code, category,
                                      value_kind, canonical_unit)
-                                   VALUES ('pr_test_longest_ride', 'Тест: рекорд', 'fitness',
-                                           'numeric', 'm') RETURNING id""")).scalar()
+                                   VALUES ('pr_test_longest_ride', 'fitness', 'numeric', 'm')
+                                   RETURNING id""")).scalar()
         sid = conn.execute(text("""INSERT INTO ingestion_sources (user_id, channel, extracted_by,
                                      review_status) VALUES (:u, 'manual', 'human', 'approved')
                                    RETURNING id"""), {"u": uid}).scalar()
