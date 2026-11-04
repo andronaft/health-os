@@ -19,8 +19,9 @@ export function el(tag, attributes = {}, ...children) {
   return node;
 }
 
-// Keys are the values core/normalize.py stores, plus "pending" for a value not yet reviewed.
-const STATUS_ICONS = { low: "↓", normal: "↔", high: "↑", pending: "…", unknown: "–" };
+// Keys are the values core/normalize.py and the critical-value check store, plus "pending" for a
+// value not yet reviewed.
+const STATUS_ICONS = { low: "↓", normal: "↔", high: "↑", critical: "‼", pending: "…", unknown: "–" };
 
 /** Anything unrecognised is "unknown": a missing or new status must never pass as in range. */
 export function statusKey(status) {
@@ -35,6 +36,23 @@ export function statusPill(status) {
   return el("span", { class: "pill", "data-status": key },
     el("span", { class: "pill-icon", "aria-hidden": "true" }, STATUS_ICONS[key]),
     statusWord(key));
+}
+
+/** The date part of what the API sends: the same date get_health_summary prints for that value. */
+export const formatDate = (iso) => (iso ? String(iso).slice(0, 10) : "");
+
+/** "<5 mmol/L" from a row's value, comparator and unit; the text of a non-numeric result. */
+export function formatValue({ value, comparator, text, unit }) {
+  if (value === null || value === undefined) return text ?? "";
+  return [`${comparator ?? ""}${value}`, unit].filter(Boolean).join(" ");
+}
+
+/** The range printed on the form: "0–5.2", "≤ 5.2", "≥ 1.2"; "" if it had none. */
+export function formatRange({ ref_min: low, ref_max: high }) {
+  const has = (bound) => bound !== null && bound !== undefined;
+  if (has(low) && has(high)) return `${low}–${high}`;
+  if (has(high)) return `≤ ${high}`;
+  return has(low) ? `≥ ${low}` : "";
 }
 
 /** Nothing to show. The note is on by default: an empty list must never read as "all is well". */
@@ -96,8 +114,9 @@ export function filterRows(rows, columns, query) {
  * pending:   (row) => true for values not yet reviewed; such a row must not look like a fact
  * empty:     shown instead of the table when there are no rows (default: emptyState())
  * sort:      initial { key, direction }
+ * filterable: false for a short list, where a filter box is only in the way
  */
-export function dataTable({ columns, rows, caption, pending, empty = emptyState(), sort }) {
+export function dataTable({ columns, rows, caption, pending, empty = emptyState(), sort, filterable = true }) {
   let data = rows;
   let sortKey = sort?.key;
   let direction = sort?.direction ?? "asc";
@@ -171,7 +190,7 @@ export function dataTable({ columns, rows, caption, pending, empty = emptyState(
     });
 
     count.textContent = t("table.count", { shown: ordered.length, total: data.length });
-    controls.hidden = !data.length;
+    controls.hidden = !data.length || !filterable;
     scroller.hidden = !ordered.length;
     if (!data.length) message.replaceChildren(empty);
     else if (!ordered.length) message.replaceChildren(noMatch);

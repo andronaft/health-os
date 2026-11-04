@@ -44,29 +44,17 @@ def _age(dob: date) -> int:
     return t.year - dob.year - ((t.month, t.day) < (dob.month, dob.day))
 
 
-def build(conn, user_id: str) -> SummaryResult:
-    lines: list[str] = []
-    counts: dict[str, int] = {}
-
-    # --- age/sex ---
+def read_facts(conn, user_id: str) -> dict:
+    """What the summary says, as data. The browser's overview reads these same rows, so the two
+    can't disagree."""
     prof = conn.execute(
-        text("SELECT date_of_birth, sex, blood_type FROM user_profile WHERE user_id=:u"),
+        text("SELECT date_of_birth, sex, blood_type, rh_factor, height_cm FROM user_profile "
+             "WHERE user_id=:u"),
         {"u": user_id},
     ).mappings().first()
-    lines.append(f"# Health Summary (deterministic block) — {datetime.now():%Y-%m-%d %H:%M}")
-    lines.append("")
-    if prof:
-        age = _age(prof["date_of_birth"])
-        bt = f", blood type {prof['blood_type']}" if prof["blood_type"] else ""
-        lines.append(f"**Profile:** {prof['sex']}, {age} yr{bt}")
-    else:
-        lines.append("**Profile:** not filled in (date of birth and sex required).")
-    lines.append("")
-
-    # --- pending review: critical values first (never let "no abnormalities" hide them) ---
     pending = conn.execute(
         text(
-            """SELECT ot.code, o.raw_name, o.value_numeric, o.value_text, o.unit,
+            """SELECT ot.code, o.raw_name, o.value_numeric, o.comparator, o.value_text, o.unit,
                       o.effective_at, o.status, (o.type_id IS NULL) AS unmapped,
                       (o.value_canonical IS NULL AND o.value_numeric IS NOT NULL
                        AND EXISTS (SELECT 1 FROM critical_thresholds ct
@@ -77,7 +65,94 @@ def build(conn, user_id: str) -> SummaryResult:
         ),
         {"u": user_id},
     ).mappings().all()
-    alarming = [p for p in pending if p["status"] == "critical" or p["unverifiable"]]
+    allergies = conn.execute(
+        text(
+            """SELECT allergen, reaction, severity, verified FROM allergies
+               WHERE user_id=:u AND deleted_at IS NULL ORDER BY verified DESC, allergen"""
+        ),
+        {"u": user_id},
+    ).mappings().all()
+    diags = conn.execute(
+        text(
+            """SELECT diagnosis_name, verification_status, icd10_code FROM diagnoses
+               WHERE user_id=:u AND clinical_status='active' AND deleted_at IS NULL
+               ORDER BY diagnosed_at DESC"""
+        ),
+        {"u": user_id},
+    ).mappings().all()
+    meds = conn.execute(
+        text(
+            """SELECT medication_name, dose_amount, dose_unit, times_per_day, product_type
+               FROM medications WHERE user_id=:u AND status='taking' AND deleted_at IS NULL
+               ORDER BY medication_name"""
+        ),
+        {"u": user_id},
+    ).mappings().all()
+    habits = conn.execute(
+        text(
+            """SELECT habit_type, status, frequency, start_date, end_date FROM habits
+               WHERE user_id=:u AND deleted_at IS NULL AND status IN ('current', 'former')
+               ORDER BY status = 'current' DESC, start_date DESC NULLS LAST"""
+        ),
+        {"u": user_id},
+    ).mappings().all()
+    last_panel = conn.execute(
+        text("SELECT max(panel_date) FROM panels WHERE user_id=:u"), {"u": user_id}
+    ).scalar()
+    stale: list[dict] = []
+    for code, label in STALE_WATCH:
+        last = conn.execute(
+            text(
+                """SELECT max(o.effective_at) FROM observations o
+                   JOIN observation_types ot ON ot.id=o.type_id
+                   WHERE o.user_id=:u AND ot.code=:c
+                     AND o.review_status='approved' AND o.deleted_at IS NULL"""
+            ),
+            {"u": user_id, "c": code},
+        ).scalar()
+        if last is None:
+            stale.append({"code": code, "label": label, "last": None, "months": None})
+        else:
+            months = (datetime.now(last.tzinfo) - last).days / 30.44
+            if months >= STALE_MONTHS:
+                stale.append({"code": code, "label": label, "last": last, "months": months})
+    return {
+        "profile": prof,
+        "age": _age(prof["date_of_birth"]) if prof and prof["date_of_birth"] else None,
+        "pending": pending,
+        "allergies": allergies,
+        "diagnoses": diags,
+        "medications": meds,
+        "habits": habits,
+        "last_panel": last_panel,
+        "stale": stale,
+    }
+
+
+def is_alarming(pending_row) -> bool:
+    """A pending value that can't wait for its review: critical, or impossible to check."""
+    return pending_row["status"] == "critical" or pending_row["unverifiable"]
+
+
+def build(conn, user_id: str) -> SummaryResult:
+    lines: list[str] = []
+    counts: dict[str, int] = {}
+    facts = read_facts(conn, user_id)
+
+    # --- age/sex ---
+    prof = facts["profile"]
+    lines.append(f"# Health Summary (deterministic block) — {datetime.now():%Y-%m-%d %H:%M}")
+    lines.append("")
+    if facts["age"] is not None and prof["sex"]:
+        bt = f", blood type {prof['blood_type']}" if prof["blood_type"] else ""
+        lines.append(f"**Profile:** {prof['sex']}, {facts['age']} yr{bt}")
+    else:
+        lines.append("**Profile:** not filled in (date of birth and sex required).")
+    lines.append("")
+
+    # --- pending review: critical values first (never let "no abnormalities" hide them) ---
+    pending = facts["pending"]
+    alarming = [p for p in pending if is_alarming(p)]
     unmapped = [p for p in pending if p["unmapped"]]
     if pending:
         lines.append(f"## ⚠️ Awaiting review ({len(pending)} values, not yet facts)")
@@ -103,13 +178,7 @@ def build(conn, user_id: str) -> SummaryResult:
         lines.append("")
 
     # --- allergies (including unverified!) ---
-    allergies = conn.execute(
-        text(
-            """SELECT allergen, reaction, severity, verified FROM allergies
-               WHERE user_id=:u AND deleted_at IS NULL ORDER BY verified DESC, allergen"""
-        ),
-        {"u": user_id},
-    ).mappings().all()
+    allergies = facts["allergies"]
     counts["allergies"] = len(allergies)
     lines.append(f"## Allergies ({len(allergies)})")
     if allergies:
@@ -122,14 +191,7 @@ def build(conn, user_id: str) -> SummaryResult:
     lines.append("")
 
     # --- active diagnoses with verification_status ---
-    diags = conn.execute(
-        text(
-            """SELECT diagnosis_name, verification_status, icd10_code FROM diagnoses
-               WHERE user_id=:u AND clinical_status='active' AND deleted_at IS NULL
-               ORDER BY diagnosed_at DESC"""
-        ),
-        {"u": user_id},
-    ).mappings().all()
+    diags = facts["diagnoses"]
     counts["active_diagnoses"] = len(diags)
     lines.append(f"## Active diagnoses ({len(diags)})")
     if diags:
@@ -143,14 +205,7 @@ def build(conn, user_id: str) -> SummaryResult:
     lines.append("")
 
     # --- current medications with doses ---
-    meds = conn.execute(
-        text(
-            """SELECT medication_name, dose_amount, dose_unit, times_per_day, product_type
-               FROM medications WHERE user_id=:u AND status='taking' AND deleted_at IS NULL
-               ORDER BY medication_name"""
-        ),
-        {"u": user_id},
-    ).mappings().all()
+    meds = facts["medications"]
     counts["current_medications"] = len(meds)
     lines.append(f"## Current medications ({len(meds)})")
     if meds:
@@ -166,14 +221,7 @@ def build(conn, user_id: str) -> SummaryResult:
     lines.append("")
 
     # --- habits: current + former (past smoking still counts for risk) ---
-    habits = conn.execute(
-        text(
-            """SELECT habit_type, status, frequency, start_date, end_date FROM habits
-               WHERE user_id=:u AND deleted_at IS NULL AND status IN ('current', 'former')
-               ORDER BY status = 'current' DESC, start_date DESC NULLS LAST"""
-        ),
-        {"u": user_id},
-    ).mappings().all()
+    habits = facts["habits"]
     counts["habits"] = len(habits)
     lines.append(f"## Habits ({len(habits)})")
     if habits:
@@ -187,28 +235,11 @@ def build(conn, user_id: str) -> SummaryResult:
     lines.append("")
 
     # --- last panel + what hasn't been checked in a long time/ever ---
-    last_panel = conn.execute(
-        text("SELECT max(panel_date) FROM panels WHERE user_id=:u"), {"u": user_id}
-    ).scalar()
     lines.append("## Recency check of examinations")
-    lines.append(f"- Last lab panel: {last_panel or 'none in the system'}")
-    stale: list[str] = []
-    for code, label in STALE_WATCH:
-        last = conn.execute(
-            text(
-                """SELECT max(o.effective_at) FROM observations o
-                   JOIN observation_types ot ON ot.id=o.type_id
-                   WHERE o.user_id=:u AND ot.code=:c
-                     AND o.review_status='approved' AND o.deleted_at IS NULL"""
-            ),
-            {"u": user_id, "c": code},
-        ).scalar()
-        if last is None:
-            stale.append(f"{label}: **never** measured in the system")
-        else:
-            months = (datetime.now(last.tzinfo) - last).days / 30.44
-            if months >= STALE_MONTHS:
-                stale.append(f"{label}: last ~{months:.0f} mo. ago ({last:%Y-%m-%d})")
+    lines.append(f"- Last lab panel: {facts['last_panel'] or 'none in the system'}")
+    stale = [f"{s['label']}: **never** measured in the system" if s["last"] is None else
+             f"{s['label']}: last ~{s['months']:.0f} mo. ago ({s['last']:%Y-%m-%d})"
+             for s in facts["stale"]]
     if stale:
         lines.append("- ⚠️ Not checked in a long time/ever (absence of data is also a fact):")
         lines.extend(f"  - {s}" for s in stale)

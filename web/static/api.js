@@ -74,5 +74,6 @@ export function explain(err) {
   if (!(err instanceof ApiError)) return t("error.page"); // a bug in the page, not the server
   if (err.status === 403) return t("error.token");
   if (err.status === 0) return t("error.network");
+  if (err.status === 503) return t("error.database");
   return t("error.server", { detail: err.message });
 }

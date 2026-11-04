@@ -5,12 +5,15 @@ Profile-dependent recommendations with an age gate and "you don't need this YET"
 is the date of the last time it was done (from the DB). The calendar deliberately can say
 "too early" and "long overdue".
 
-Pure function build_calendar(sex, age, last_done, flags) — tested without a DB.
+Pure function build_calendar(sex, age, last_done, flags) — tested without a DB. for_user() gathers
+its inputs from the database, for the MCP tool and the browser UI.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+
+from sqlalchemy import text
 
 # recommendation statuses
 DUE = "due"                 # time to do it (not done yet or no data, but the age fits)
@@ -133,3 +136,58 @@ def build_calendar(
         out.append(Recommendation(r["code"], r["label"], status, detail, done))
 
     return out
+
+
+def for_user(conn, uid: str | None) -> dict:
+    """The calendar for this user's profile, or {"error": ...} without one. Reads base tables
+    (the profile, family history, exposures), which the read-only login can't."""
+    prof = conn.execute(
+        text("SELECT date_of_birth, sex FROM user_profile WHERE user_id=:u"), {"u": uid}
+    ).mappings().first()
+    if not prof or not prof["date_of_birth"] or not prof["sex"]:
+        return {"error": "profile not filled in (date of birth and sex required)"}
+    dob, sex = prof["date_of_birth"], prof["sex"]
+    age = date.today().year - dob.year - ((date.today().month, date.today().day) < (dob.month, dob.day))
+
+    def _last(codes: list[str]):
+        return conn.execute(
+            text("""SELECT max(o.effective_at) FROM observations o
+                    JOIN observation_types ot ON ot.id=o.type_id
+                    WHERE o.user_id=:u AND ot.code = ANY(:c)
+                      AND o.review_status='approved' AND o.deleted_at IS NULL"""),
+            {"u": uid, "c": codes},
+        ).scalar()
+
+    last_done = {}
+    for key, codes in {"bp": ["systolic_bp"], "lipids": ["cholesterol_total"],
+                       "glucose_hba1c": ["glucose", "hba1c"]}.items():
+        d = _last(codes)
+        if d is not None:
+            last_done[key] = d.date() if hasattr(d, "date") else d
+    tdap = conn.execute(
+        text("""SELECT max(vaccination_date) FROM vaccinations WHERE user_id=:u
+                AND deleted_at IS NULL AND (disease ILIKE '%правець%' OR disease ILIKE '%дифтер%'
+                OR disease ILIKE '%tetanus%' OR disease ILIKE '%diphther%')"""),
+        {"u": uid},
+    ).scalar()
+    if tdap:
+        last_done["tdap"] = tdap
+
+    def _fam(patterns: list[str]) -> bool:
+        return bool(conn.execute(
+            text("""SELECT 1 FROM family_history WHERE user_id=:u AND deleted_at IS NULL
+                    AND (""" + " OR ".join(f"condition ILIKE :p{i}" for i in range(len(patterns))) + ") LIMIT 1"),
+            {"u": uid, **{f"p{i}": p for i, p in enumerate(patterns)}},
+        ).first())
+
+    flags = {
+        "family_colorectal_cancer": _fam(["%колорект%", "%товстої кишки%", "%colorectal%"]),
+        "family_prostate_cancer": _fam(["%простат%", "%prostate%"]),
+        "noise_or_blast_exposure": bool(conn.execute(
+            text("""SELECT 1 FROM exposures WHERE user_id=:u AND deleted_at IS NULL
+                    AND exposure_type IN ('military','blast_injury','occupational') LIMIT 1"""),
+            {"u": uid},
+        ).first()),
+    }
+    return {"age": age, "sex": sex,
+            "recommendations": [vars(r) for r in build_calendar(sex, age, last_done, flags)]}
