@@ -7,13 +7,28 @@
   <title>health-os</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/theme-init.js"></script>
   <script type="module" src="/static/app.js"></script>
 </head>
 <body>
-  <main>
-    <h1>health-os</h1>
-    <p id="status" class="status" data-state="pending" role="status" aria-live="polite">connecting…</p>
-  </main>
-  <footer>Local and read-only. Not a medical device.</footer>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="frame">
+    <header class="sidebar">
+      <a class="brand" href="#/">health-os</a>
+      <nav id="nav" aria-label="Pages"></nav>
+      <div id="theme-picker" class="theme-picker"></div>
+    </header>
+    <div class="content">
+      <div id="connection-problem"></div>
+      <main id="main" tabindex="-1">
+        <noscript><p>This page needs JavaScript.</p></noscript>
+      </main>
+      <footer>
+        <p><strong>Not a medical device.</strong> For information only: it does not diagnose and
+          does not replace a doctor. Local and read-only.</p>
+        <p id="status" class="status" data-state="pending" role="status" aria-live="polite">connecting…</p>
+      </footer>
+    </div>
+  </div>
 </body>
 </html>

@@ -1,92 +1,105 @@
-// health-os browser UI: the session token and the connection check against the local API.
+// health-os browser UI: the frame every page shares — navigation, routing, connection status.
 
-const TOKEN_KEY = "health-os-token";
-const TOKEN_HEADER = "X-Health-OS-Token";
+import { ApiError, TOKEN_KEY, api, explain, reloadToken } from "./api.js";
+import { el, emptyState, errorState } from "./components.js";
+import { PAGES, parseRoute } from "./pages.js";
+import { t } from "./strings.js";
+import { setUpThemePicker } from "./theme.js";
 
-// `make ui` opens http://127.0.0.1:PORT/#token=… — the fragment is never sent to the server
-// or written to its log. Take it out of the address bar and keep it in localStorage, so other
-// tabs and bookmarks of this UI work while this run lasts. localStorage belongs to one origin,
-// port included (a cookie would also go to every other server on 127.0.0.1); a token left there
-// from an earlier run is useless, since every run makes a new one.
-function takeToken() {
-  const params = new URLSearchParams(location.hash.slice(1));
-  const fromLink = params.get("token");
-  if (fromLink) {
-    try {
-      localStorage.setItem(TOKEN_KEY, fromLink);
-    } catch {
-      // storage blocked: the token still works until this page is reloaded
-    }
-    params.delete("token");
-    const rest = params.toString();
-    history.replaceState(null, "", location.pathname + location.search + (rest ? `#${rest}` : ""));
-    return fromLink;
-  }
-  try {
-    return localStorage.getItem(TOKEN_KEY) || "";
-  } catch {
-    return "";
-  }
-}
+const main = document.getElementById("main");
+const navLinks = new Map();
 
-let token = takeToken();
-
-class ApiError extends Error {
-  constructor(status, message = `HTTP ${status}`) {
-    super(message);
-    this.status = status;
-  }
-}
-
-const TIMEOUT_MS = 10000;
-
-async function api(path) {
-  const res = await fetch(`/api/v1/${path}`, {
-    headers: token ? { [TOKEN_HEADER]: token } : {},
-    cache: "no-store",
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+function buildNav() {
+  const items = PAGES.map((page) => {
+    const link = el("a", { href: `#/${page.id}` }, t(page.title));
+    navLinks.set(page.id, link);
+    return el("li", {}, link);
   });
-  if (!res.ok) throw new ApiError(res.status);
-  try {
-    return await res.json();
-  } catch {
-    throw new ApiError(res.status, `HTTP ${res.status}, not JSON`);
+  document.getElementById("nav").append(el("ul", {}, ...items));
+}
+
+function markCurrentPage(id) {
+  for (const [pageId, link] of navLinks) {
+    if (pageId === id) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
   }
 }
 
-function explain(err) {
-  if (err instanceof ApiError && err.status === 403) {
-    return "the session token is missing or out of date. Open the link printed by `make ui`.";
+const currentRoute = () => parseRoute(location.hash) ?? parseRoute("");
+
+let firstRender = true;
+
+async function render(route) {
+  const heading = el("h1", { tabindex: "-1" }, t(route.page?.title ?? "error.not_found_title"));
+  // each render fills its own element: a slow page that finishes after the user has moved on
+  // writes into a detached node, not over the new page
+  const view = el("div", { class: "view" });
+  main.replaceChildren(heading, view);
+  document.title = `${heading.textContent} · health-os`;
+  window.scrollTo(0, 0);
+  markCurrentPage(route.page?.id);
+  if (!firstRender) heading.focus({ preventScroll: true }); // screen readers follow the change
+  firstRender = false;
+
+  if (!route.page) {
+    view.append(errorState({ title: t("error.not_found") }));
+    return;
   }
-  if (err instanceof ApiError) return `unexpected response from the server (${err.message}).`;
-  // network error or timeout
-  return "the server is not responding. Is `make ui` still running?";
+  if (!route.page.load) {
+    view.append(emptyState({ message: t("empty.not_built") }));
+    return;
+  }
+  try {
+    const page = await route.page.load();
+    await page.render(view, route.args);
+  } catch (err) {
+    console.error(err);
+    view.replaceChildren(errorState({ message: explain(err), onRetry: () => render(route) }));
+  }
 }
+
+let statusCheck = 0;
 
 async function showStatus() {
-  const el = document.getElementById("status");
+  const check = ++statusCheck; // only the latest check may speak: a slow old one is out of date
+  const status = document.getElementById("status");
+  const problem = document.getElementById("connection-problem");
   try {
     const health = await api("health");
     if (!health.ok) throw new ApiError(200, "health check not ok");
-    el.textContent = `connected · version ${health.version}`;
-    el.dataset.state = "ok";
+    if (check !== statusCheck) return;
+    status.textContent = t("connection.ok", { version: health.version });
+    status.dataset.state = "ok";
+    problem.replaceChildren();
   } catch (err) {
-    el.textContent = `not connected: ${explain(err)}`;
-    el.dataset.state = "error";
+    if (check !== statusCheck) return;
+    status.textContent = t("connection.lost");
+    status.dataset.state = "error";
+    problem.replaceChildren(errorState({
+      title: t("connection.lost"),
+      message: explain(err),
+      onRetry: showStatus,
+    }));
   }
 }
 
+buildNav();
+setUpThemePicker(document.getElementById("theme-picker"));
+render(currentRoute());
 showStatus();
-// pasting a new `make ui` link into an open tab changes only the fragment: no reload
+
+// a menu link or back/forward; also a new `make ui` link pasted into an open tab, which changes
+// only the fragment: no reload
 window.addEventListener("hashchange", () => {
-  token = takeToken();
-  showStatus();
+  if (reloadToken()) showStatus();
+  const route = parseRoute(location.hash);
+  if (route) render(route); // otherwise the skip link's #main: the browser handles that
 });
 // a new link opened in another tab (after `make ui` was restarted) reaches this one too
 window.addEventListener("storage", (e) => {
-  if (e.key !== TOKEN_KEY || !e.newValue || e.newValue === token) return;
-  token = e.newValue;
+  if (e.key !== TOKEN_KEY || !e.newValue || !reloadToken()) return;
   showStatus();
+  render(currentRoute());
 });
 // a tab left open after `make ui` stopped must not keep saying "connected"
 document.addEventListener("visibilitychange", () => {

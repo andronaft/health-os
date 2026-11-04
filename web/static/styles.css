@@ -1,30 +1,46 @@
 /* health-os browser UI. System fonts only: the CSP allows no external resources. */
 
+/* Tokens. light-dark() keeps both values of a token on one line and picks by color-scheme, so the
+   theme picker only has to set data-theme. Colour never carries meaning alone. */
 :root {
   color-scheme: light dark;
-  --bg: #fbfbfa;
-  --fg: #1d1d1f;
-  --muted: #5f6368;
-  --border: #dcdcd8;
-  --ok: #1a7f37;
-  --error: #b42318;
-  --pending: #8a8a8a;
+  --bg: light-dark(#fbfbfa, #161618);
+  --surface: light-dark(#ffffff, #1f1f22);
+  --fg: light-dark(#1d1d1f, #ececec);
+  --muted: light-dark(#5f6368, #a0a0a5);
+  --border: light-dark(#dcdcd8, #3a3a3e);
+  --accent: light-dark(#1f5fbf, #7db2ff);
+  --ok: light-dark(#1a7f37, #4ac26b);
+  --error: light-dark(#b42318, #ff7b72);
+
+  /* value status; every pill also has its word and icon */
+  --low: light-dark(#1f5fbf, #7db2ff);
+  --in-range: light-dark(#1a7f37, #4ac26b);
+  --high: light-dark(#b42318, #ff7b72);
+  --pending: light-dark(#5f6368, #a0a0a5);
+
+  /* chart series, in this order: the neighbours stay apart under colour blindness. Slots 3 and 4
+     are under 3:1 on the light background, so a chart using them needs direct labels or a table. */
+  --chart-1: light-dark(#2a78d6, #3987e5);
+  --chart-2: light-dark(#eb6834, #d95926);
+  --chart-3: light-dark(#1baf7a, #199e70);
+  --chart-4: light-dark(#eda100, #c98500);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #161618;
-    --fg: #ececec;
-    --muted: #a0a0a5;
-    --border: #3a3a3e;
-    --ok: #4ac26b;
-    --error: #ff7b72;
-    --pending: #8b8b90;
-  }
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 * {
   box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
 }
 
 html {
@@ -34,28 +50,228 @@ html {
 
 body {
   margin: 0;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
   background: var(--bg);
   color: var(--fg);
 }
 
-main,
-footer {
-  width: 100%;
-  max-width: 60rem;
-  margin: 0 auto;
-  padding: 2rem 1rem;
+a {
+  color: var(--accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* focus moved there by a script, for screen readers: no ring around a heading */
+h1:focus,
+main:focus {
+  outline: none;
+}
+
+h1 {
+  margin: 0 0 1rem;
+  font-size: 1.5rem;
+}
+
+button {
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+input,
+select {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.skip-link {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 1;
+  padding: 0.25rem 0.75rem;
+  background: var(--surface);
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+/* Layout: a menu on the side; on a phone-width window it moves to the top and wraps, so every page
+   stays in sight. */
+
+.frame {
+  display: grid;
+  grid-template-columns: 13rem minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  height: 100vh;
+  padding: 1rem 0;
+  overflow-y: auto;
+  border-inline-end: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.brand {
+  padding-inline: 1rem;
+  color: var(--fg);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+nav ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+nav a {
+  display: block;
+  padding: 0.375rem 1rem;
+  border-inline-start: 3px solid transparent;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+nav a:hover {
+  color: var(--fg);
+}
+
+/* the bar and the weight mark it, not only the colour */
+nav a[aria-current="page"] {
+  border-inline-start-color: var(--accent);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.theme-picker {
+  margin-top: auto;
+  padding-inline: 1rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#connection-problem:not(:empty) {
+  padding: 1rem 1.5rem 0;
 }
 
 main {
   flex: 1;
+  width: 100%;
+  max-width: 75rem;
+  padding: 1.5rem;
 }
 
-h1 {
-  margin: 0 0 0.75rem;
-  font-size: 1.5rem;
+footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1.5rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+footer p {
+  margin: 0;
+}
+
+footer strong {
+  color: var(--fg);
+}
+
+@media (max-width: 47.99rem) {
+  .frame {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+  }
+
+  .sidebar {
+    position: static;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 0.5rem;
+    height: auto;
+    padding: 0.75rem 0 0;
+    overflow: visible;
+    border-inline-end: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .theme-picker {
+    grid-row: 1;
+    grid-column: 2;
+    margin: 0;
+  }
+
+  nav {
+    grid-column: 1 / -1;
+  }
+
+  nav ul {
+    display: flex;
+    flex-wrap: wrap;
+    padding-inline: 0.5rem;
+  }
+
+  nav a {
+    padding: 0.5rem;
+    border-inline-start: 0;
+    border-bottom: 3px solid transparent;
+    white-space: nowrap;
+  }
+
+  nav a[aria-current="page"] {
+    border-bottom-color: var(--accent);
+  }
+
+  main {
+    padding: 1rem;
+  }
+
+  footer {
+    padding-inline: 1rem;
+  }
+
+  #connection-problem:not(:empty) {
+    padding-inline: 1rem;
+  }
 }
 
 /* the state is in the words; the dot only repeats it */
@@ -63,12 +279,6 @@ h1 {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  margin: 0;
-  padding: 0.25rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  color: var(--muted);
-  font-size: 0.9rem;
 }
 
 .status::before {
@@ -80,16 +290,11 @@ h1 {
   background: var(--pending);
 }
 
-.status[data-state="ok"] {
-  color: var(--fg);
-}
-
 .status[data-state="ok"]::before {
   background: var(--ok);
 }
 
 .status[data-state="error"] {
-  border-color: var(--error);
   color: var(--error);
 }
 
@@ -97,9 +302,176 @@ h1 {
   background: var(--error);
 }
 
-footer {
-  padding-block: 1rem;
-  border-top: 1px solid var(--border);
+/* Status pill. Out of range is filled, in range is plain, pending is hollow and dashed: a pending
+   value must never look like a fact. */
+
+.pill {
+  --pill: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0 0.5rem;
+  border: 1px solid var(--pill);
+  border-radius: 999px;
+  color: var(--pill);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.pill-icon {
+  font-weight: 700;
+}
+
+.pill[data-status="low"] {
+  --pill: var(--low);
+  background: color-mix(in srgb, var(--low) 12%, transparent);
+  font-weight: 600;
+}
+
+.pill[data-status="high"] {
+  --pill: var(--high);
+  background: color-mix(in srgb, var(--high) 12%, transparent);
+  font-weight: 600;
+}
+
+.pill[data-status="normal"] {
+  --pill: var(--in-range);
+}
+
+.pill[data-status="pending"] {
+  --pill: var(--pending);
+  border-style: dashed;
+  font-style: italic;
+}
+
+/* a pending value anywhere, and a whole pending row of a table */
+.value-pending,
+tr[data-pending] td {
   color: var(--muted);
-  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.value-pending {
+  text-decoration: underline dashed;
+}
+
+tr[data-pending] td:first-child {
+  border-inline-start: 3px dashed var(--pending);
+}
+
+/* Empty and error states */
+
+.state {
+  padding: 1rem 1.25rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+.state p {
+  margin: 0 0 0.25rem;
+}
+
+.state-title {
+  font-weight: 600;
+}
+
+.state-note {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.state-error {
+  border: 1px solid var(--error);
+}
+
+.state-error .state-title {
+  color: var(--error);
+}
+
+.state-icon {
+  display: inline-block;
+  width: 1.25em;
+  margin-inline-end: 0.4em;
+  border-radius: 50%;
+  background: var(--error);
+  color: var(--surface);
+  font-weight: 700;
+  text-align: center;
+}
+
+.state button {
+  margin-top: 0.5rem;
+}
+
+/* Table */
+
+.table-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.table-count {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+  white-space: nowrap;
+}
+
+td.wrap {
+  min-width: 14rem;
+  white-space: normal;
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.num {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.sort-button {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-weight: 600;
+}
+
+.sort-icon {
+  min-width: 0.75em;
+  font-size: 0.75em;
+}
+
+/* Chart: a size for ECharts to fill */
+
+.chart {
+  width: 100%;
+  height: 20rem;
 }

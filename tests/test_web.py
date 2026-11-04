@@ -1,8 +1,11 @@
-"""web/: the local browser UI server — Host check, session token, CSP, GET only (#50)."""
+"""web/: the local browser UI server — Host check, session token, CSP, GET only (#50) — and the
+frame every page shares: its files, tokens, words and the vendored ECharts (#53)."""
+import hashlib
 import re
 import shutil
 import socket
 import stat
+import subprocess
 import sys
 import tomllib
 from importlib.metadata import PackageNotFoundError
@@ -17,6 +20,9 @@ import web.app
 from web.app import ROOT, STATIC, create_app
 
 BASE = "http://127.0.0.1:8765"
+ECHARTS = STATIC / "vendor" / "echarts"
+OUR_FILES = sorted(p for p in STATIC.rglob("*") if p.is_file() and "vendor" not in p.parts)
+OUR_SCRIPTS = [p for p in OUR_FILES if p.suffix == ".js"]
 
 
 @pytest.fixture()
@@ -43,6 +49,123 @@ def test_static_module_is_served_as_javascript(client):
     r = client.get("/static/app.js")
     assert r.status_code == 200
     assert "javascript" in r.headers["content-type"]  # with nosniff, anything else is blocked
+
+
+def test_frame_has_navigation_and_the_disclaimer(client):
+    html = client.get("/").text
+    assert 'id="nav"' in html and 'id="main"' in html
+    assert "Not a medical device" in html  # in the page itself: it shows even if a script fails
+
+
+def test_theme_is_set_before_the_first_paint():
+    # a module runs after the first paint, which would flash the other theme
+    html = (STATIC / "index.html").read_text()
+    assert '<script src="/static/theme-init.js"></script>' in html
+    for name in ("theme-init.js", "theme.js"):
+        assert '"health-os-theme"' in (STATIC / name).read_text(), name
+
+
+def test_every_local_file_the_ui_refers_to_is_served(client):
+    html = (STATIC / "index.html").read_text()
+    urls = re.findall(r'(?:src|href)="(/static/[^"]+)"', html)
+    for script in OUR_SCRIPTS:
+        for rel in re.findall(r"""(?:from\s+|import\()"(\.[^"<]+)\"""", script.read_text()):
+            urls.append("/static/" + (script.parent / rel).resolve().relative_to(STATIC).as_posix())
+    assert "/static/vendor/echarts/echarts.esm.min.js" in urls
+    for url in urls:
+        r = client.get(url)
+        assert r.status_code == 200, url
+        if url.endswith(".js"):  # with nosniff, anything else is blocked
+            assert "javascript" in r.headers["content-type"], url
+        if url.endswith(".css"):
+            assert r.headers["content-type"].startswith("text/css"), url
+
+
+def test_our_files_name_nothing_external():
+    for path in OUR_FILES:
+        text = path.read_text()
+        assert not re.search(r"https?://(?!127\.0\.0\.1)", text), path
+        assert not re.search(r"""(?:src|href)=["']//""", text), path
+    css = (STATIC / "styles.css").read_text()
+    assert "@import" not in css and "url(" not in css
+
+
+def test_csp_stays_strict(client):
+    # ECharts works without these (checked in the browser), so nothing should ever loosen it
+    csp = client.get("/").headers["content-security-policy"]
+    assert "unsafe" not in csp and "http" not in csp and "*" not in csp
+
+
+def test_scripts_never_parse_records_as_html_or_set_a_style_attribute():
+    for script in OUR_SCRIPTS:
+        text = script.read_text()
+        for banned in ("innerHTML", "outerHTML", "insertAdjacentHTML", 'setAttribute("style"'):
+            assert banned not in text, f"{script.name}: {banned}"
+
+
+def test_css_tokens_are_defined_and_have_both_themes():
+    css = (STATIC / "styles.css").read_text()
+    defined = set(re.findall(r"(--[\w-]+):", css))
+    assert set(re.findall(r"var\((--[\w-]+)", css)) <= defined
+    chart = (STATIC / "chart.js").read_text()
+    assert set(re.findall(r'"(--[\w-]+)"', chart)) <= defined
+    assert not re.search(r"--[\w-]+:\s*#", css)  # a bare colour would be the same in both themes
+    for theme in ("light", "dark"):
+        assert f':root[data-theme="{theme}"]' in css
+
+
+def test_every_word_the_ui_uses_is_in_the_table():
+    table = (STATIC / "strings.js").read_text()
+    keys = set(re.findall(r'^\s*"([\w.]+)":', table, re.M))
+    prefixes = "nav|theme|status|table|empty|error|connection"
+    used = set()
+    for script in OUR_SCRIPTS:
+        if script.name != "strings.js":
+            used |= set(re.findall(rf'"((?:{prefixes})\.[\w.]+)"', script.read_text()))
+    assert used and used <= keys
+    assert {f"theme.{c}" for c in ("auto", "light", "dark")} <= keys  # built with a template
+
+
+def test_the_ui_never_says_everything_is_normal():
+    for path in OUR_FILES:
+        text = path.read_text().lower()
+        for phrase in ("everything is normal", "all normal", "all good", "no problems"):
+            assert phrase not in text, f"{path.name}: {phrase}"
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node is not installed")
+def test_ui_logic():
+    # sorting, filtering, statuses, routes: everything in the UI's scripts that needs no browser
+    r = subprocess.run(["node", "--test", str(ROOT / "tests" / "web_ui.test.mjs")],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_echarts_is_vendored_with_its_licences(client):
+    assert "Apache License" in (ECHARTS / "LICENSE").read_text()
+    assert "Apache ECharts" in (ECHARTS / "NOTICE").read_text()
+    assert "Redistribution" in (ECHARTS / "licenses" / "LICENSE-d3").read_text()  # named by LICENSE
+    r = client.get("/static/vendor/echarts/echarts.esm.min.js")
+    assert r.status_code == 200 and "javascript" in r.headers["content-type"]
+
+
+def test_echarts_is_the_untouched_release_and_requests_nothing():
+    readme = (STATIC / "vendor" / "README.md").read_text()
+    bundle = (ECHARTS / "echarts.esm.min.js").read_bytes()
+    assert hashlib.sha256(bundle).hexdigest() == re.search(r"sha256: ([0-9a-f]{64})", readme)[1]
+    assert b"XMLHttpRequest" not in bundle and not re.search(rb"[^\w.]fetch\(", bundle)
+
+
+def test_chart_tooltips_are_painted_not_parsed_as_html():
+    # the default HTML tooltip breaks under the CSP (checked in the browser: 21 violations from one
+    # hover) and would parse whatever a record holds
+    assert 'renderMode: "richText"' in (STATIC / "chart.js").read_text()
+
+
+def test_the_frame_does_not_load_echarts_until_a_chart_needs_it():
+    # 1 MB on every page otherwise
+    assert "vendor" not in (STATIC / "index.html").read_text()
+    assert "chart.js" not in (STATIC / "app.js").read_text()
 
 
 def test_api_needs_the_session_token(client):
