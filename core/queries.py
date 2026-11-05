@@ -189,6 +189,37 @@ def timeline(conn, uid: str, days: int = 3650, limit: int = MAX_ROWS) -> list[di
     return [dict(r) for r in rows]
 
 
+def recent_events(conn, uid: str, limit: int) -> list[dict]:
+    """The latest events up to now, for the overview. A lab panel with values still under review
+    is flagged: it must not read as a finished result. It takes a base table to tell, so this
+    one doesn't run on the read-only login."""
+    rows = conn.execute(
+        text(
+            """SELECT t.kind, (t.at AT TIME ZONE 'UTC')::date AS date, t.title,
+                      (t.kind = 'panel' AND EXISTS (
+                          SELECT 1 FROM observations o
+                          WHERE o.panel_id = t.id AND o.review_status = 'pending'
+                            AND o.deleted_at IS NULL)) AS pending
+               FROM health_timeline t
+               WHERE t.user_id=:u AND t.at <= now()
+               ORDER BY t.at DESC LIMIT :lim"""
+        ),
+        {"u": uid, "lim": max(1, int(limit))},
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def marker_names(conn, lang: str) -> dict[str, str]:
+    """code → name in `lang`; a marker without one falls back to English, then Ukrainian."""
+    rows = conn.execute(
+        text("SELECT type_code, lang, name FROM v_observation_type_names "
+             "WHERE lang IN ('uk', 'en', :lang)"),
+        {"lang": lang},
+    ).all()
+    rank = {"uk": 0, "en": 1, lang: 2}
+    return {code: name for code, _, name in sorted(rows, key=lambda r: rank[r[1]])}
+
+
 def view_rows(conn, uid: str, name: str, limit: int = MAX_ROWS) -> list[dict]:
     """The user's rows of one of VIEWS (medications, diagnoses, allergies, habits, pending)."""
     view = VIEWS[name]  # KeyError for anything else: never interpolate a caller's string

@@ -3,7 +3,7 @@
 // whose `render(view, args)` fills `view`; until then the frame shows an empty state.
 
 export const PAGES = [
-  { id: "overview", title: "nav.overview" },
+  { id: "overview", title: "nav.overview", load: () => import("./pages/overview.js") },
   { id: "labs", title: "nav.labs" },
   { id: "vitals", title: "nav.vitals" },
   { id: "timeline", title: "nav.timeline" },

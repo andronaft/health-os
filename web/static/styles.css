@@ -17,6 +17,7 @@
   --low: light-dark(#1f5fbf, #7db2ff);
   --in-range: light-dark(#1a7f37, #4ac26b);
   --high: light-dark(#b42318, #ff7b72);
+  --critical: light-dark(#b42318, #ff7b72);
   --pending: light-dark(#5f6368, #a0a0a5);
 
   /* chart series, in this order: the neighbours stay apart under colour blindness. Slots 3 and 4
@@ -334,6 +335,13 @@ footer strong {
   font-weight: 600;
 }
 
+.pill[data-status="critical"] {
+  --pill: var(--critical);
+  background: var(--critical);
+  color: var(--surface);
+  font-weight: 700;
+}
+
 .pill[data-status="normal"] {
   --pill: var(--in-range);
 }
@@ -474,4 +482,217 @@ tbody tr:last-child td {
 .chart {
   width: 100%;
   height: 20rem;
+}
+
+.chart.sparkline {
+  height: 3.5rem;
+}
+
+/* Overview */
+
+.overview {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.overview h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.125rem;
+}
+
+.overview h3 {
+  margin: 1.25rem 0 0.25rem;
+  font-size: 1rem;
+}
+
+.overview-section > h2 + h3 {
+  margin-top: 0;
+}
+
+.overview p {
+  margin: 0 0 0.5rem;
+}
+
+.quiet {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.plain {
+  margin: 0 0 0.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.overview details {
+  margin-top: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.overview summary {
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.overview details .plain {
+  margin-top: 0.25rem;
+  padding-inline-start: 1rem;
+}
+
+.overview-top {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr));
+  gap: 1rem;
+}
+
+.card,
+.tile {
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+/* a sentence, not a big number: it must read as what it is, N of M of what was entered */
+.figure {
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.profile-line {
+  font-weight: 600;
+}
+
+.profile-problem {
+  margin-bottom: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px dashed var(--error);
+  border-radius: 0.5rem;
+}
+
+.profile-problem ul {
+  margin: 0 0 0.5rem;
+  padding-inline-start: 1.25rem;
+}
+
+.facts {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.facts dt {
+  margin-top: 0.5rem;
+  font-weight: 600;
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Red, and a heavy border and an icon: it must not depend on telling colours apart. */
+.critical {
+  padding: 1rem 1.25rem;
+  border: 2px solid var(--critical);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--critical) 10%, var(--surface));
+}
+
+.critical h2 {
+  color: var(--critical);
+}
+
+.critical ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.critical-row + .critical-row {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--critical);
+}
+
+.critical .value-pending {
+  color: inherit;
+}
+
+.critical-value .pill {
+  margin-inline-end: 0.25rem;
+}
+
+.critical-disclaimer {
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
+}
+
+.overview .critical-disclaimer {
+  margin-bottom: 0;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(11.5rem, 100%), 1fr));
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0.75rem 1rem;
+}
+
+.overview .tile h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.overview .tile p {
+  margin-bottom: 0;
+}
+
+.tile-value strong {
+  font-size: 1.5rem;
+}
+
+.tile-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* the key's line carries the series colour; its words stay in a text colour */
+.tile-key span::before {
+  content: "";
+  display: inline-block;
+  width: 0.75rem;
+  height: 2px;
+  margin-inline-end: 0.3rem;
+  vertical-align: middle;
+}
+
+.key-1::before {
+  background: var(--chart-1);
+}
+
+.key-2::before {
+  background: var(--chart-2);
+}
+
+/* one line always, so the tile doesn't jump as the pointer moves along the chart */
+.tile-readout {
+  min-height: 1.35rem;
+  font-variant-numeric: tabular-nums;
 }

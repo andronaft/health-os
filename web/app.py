@@ -9,18 +9,27 @@ Health data, so the server is strict even though it only listens on 127.0.0.1:
 """
 from __future__ import annotations
 
+import contextlib
 import functools
 import hmac
+import json
 import tomllib
+from datetime import date, datetime
+from decimal import Decimal
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
+
+from core.db import engine
+from web.overview import overview as read_overview
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "web" / "static"
@@ -103,12 +112,47 @@ async def health(request):
     return JSONResponse({"ok": True, "version": _version()})
 
 
+def _plain(value):
+    """What the driver returns but JSON has no type for."""
+    if isinstance(value, Decimal):
+        return float(value) if value.is_finite() else None
+    if isinstance(value, date | datetime):
+        return value.isoformat()  # keeps the offset, so the date part is what the summary prints
+    raise TypeError(f"not JSON serialisable: {type(value).__name__}")
+
+
+class ApiResponse(JSONResponse):
+    def render(self, content) -> bytes:
+        return json.dumps(content, default=_plain, ensure_ascii=False, allow_nan=False,
+                          separators=(",", ":")).encode()
+
+
+@contextlib.contextmanager
+def read_only_snapshot():
+    """One consistent view of the database that Postgres refuses to write through. On the main
+    login, like get_health_summary: the profile and the critical thresholds are base tables, which
+    the read-only login can't read."""
+    with engine.connect() as conn:
+        conn.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"))
+        yield conn
+
+
+def overview(request):  # not async: Starlette runs it in a thread, so the query can't block others
+    lang = request.query_params.get("lang", "en")
+    try:
+        with read_only_snapshot() as conn:
+            return ApiResponse(read_overview(conn, lang))
+    except OperationalError:
+        return JSONResponse({"error": "database unreachable"}, status_code=503)
+
+
 def create_app(token: str) -> Starlette:
     if not token:
         raise ValueError("a session token is required")
     routes = [
         Route("/", index, methods=["GET"]),
         Route("/api/v1/health", health, methods=["GET"]),
+        Route("/api/v1/overview", overview, methods=["GET"]),
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]
     return Starlette(routes=routes, middleware=[

@@ -63,6 +63,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   existing `analytics/baselines.py`, which no tool reached before. Markers with fewer than 5
   earlier values and personal records (`pr_*`, which only ever improve) are skipped. README no
   longer claims risk calculators beyond their age gate (#33).
+- Browser UI Overview page (preview), the home page: profile card that says what a missing date
+  of birth or sex breaks; critical values in red with their escalation text, approved or not;
+  values awaiting review, marked as not yet facts; latest values out of range, overdue screenings
+  and markers not checked in over 12 months; tiles with 30-day sparklines for blood pressure
+  (7-day average), resting heart rate, HRV, sleep score and weight; recent events, with a panel
+  still under review flagged. It says "N of M recorded markers in range" and what the rest are,
+  never a global verdict. New read-only `GET /api/v1/overview`. It reads the same rows as
+  `get_health_summary` (`core.health_summary.read_facts`) in one read-only snapshot (#54).
 
 ## [0.3.0] — 2026-10-15
 

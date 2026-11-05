@@ -17,7 +17,9 @@ from starlette.testclient import TestClient
 
 import web.__main__
 import web.app
+from analytics.screening import _rules
 from web.app import ROOT, STATIC, create_app
+from web.overview import TILES
 
 BASE = "http://127.0.0.1:8765"
 ECHARTS = STATIC / "vendor" / "echarts"
@@ -117,13 +119,20 @@ def test_css_tokens_are_defined_and_have_both_themes():
 def test_every_word_the_ui_uses_is_in_the_table():
     table = (STATIC / "strings.js").read_text()
     keys = set(re.findall(r'^\s*"([\w.]+)":', table, re.M))
-    prefixes = "nav|theme|status|table|empty|error|connection"
+    prefixes = "nav|theme|status|table|empty|error|connection|overview"
     used = set()
     for script in OUR_SCRIPTS:
         if script.name != "strings.js":
             used |= set(re.findall(rf'"((?:{prefixes})\.[\w.]+)"', script.read_text()))
     assert used and used <= keys
-    assert {f"theme.{c}" for c in ("auto", "light", "dark")} <= keys  # built with a template
+    # built with a template
+    assert {f"theme.{c}" for c in ("auto", "light", "dark")} <= keys
+    assert {f"overview.tile.{tile}" for tile, _, _ in TILES} <= keys
+    assert {f"overview.profile.missing.{field}" for field in ("date_of_birth", "sex")} <= keys
+    assert {f"overview.screening.code.{rule['code']}" for rule in _rules()} <= keys
+    assert {f"overview.kind.{kind}" for kind in ("diagnosis", "visit", "procedure", "panel",
+                                                 "medication_start", "medication_stop", "hospital",
+                                                 "vaccination")} <= keys
 
 
 def test_the_ui_never_says_everything_is_normal():

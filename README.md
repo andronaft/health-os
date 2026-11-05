@@ -95,10 +95,13 @@ make ui                               # or: .venv/bin/python -m web [--port N] [
 Starts a local, read-only web page on `127.0.0.1:8765` (port: `UI_PORT` in `.env`) and opens it
 with this run's session link. Only this machine can reach it: the server listens on 127.0.0.1,
 refuses requests with a foreign `Host`, and its API answers only GET requests that carry the
-session token. So far it is the frame only: a menu, a light and a dark theme, and whether it is
-connected to the server. Every page is still empty — the data pages come in 0.4.0
-([milestone](https://github.com/andronaft/health-os/milestone/1)). Nothing is loaded from outside
-this machine: Apache ECharts is kept in `web/static/vendor/` with its licence.
+session token. The Overview page shows your profile, what needs attention (critical values with
+their escalation text, values awaiting review, latest values out of range, overdue screenings,
+markers not checked in a long time), 30-day tiles for blood pressure, resting heart rate, HRV,
+sleep score and weight, and recent events. It reads the same rows as `get_health_summary`, and
+only ever says "N of M recorded markers in range". The other pages are still empty — they come in
+0.4.0 ([milestone](https://github.com/andronaft/health-os/milestone/1)). Nothing is loaded from
+outside this machine: Apache ECharts is kept in `web/static/vendor/` with its licence.
 
 ## How it works
 
