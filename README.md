@@ -162,6 +162,8 @@ skipped locally; CI sets `REQUIRE_DB=1` so they fail instead.
 
 Development history: [PROGRESS.md](PROGRESS.md).
 
+How the guardrails work: [How to let an LLM read your medical records without trusting it](https://zhukovskyi.space/blog/health-os-guardrails/). Made by [Andrii Zhukovskyi](https://zhukovskyi.space/).
+
 ## License
 
 [AGPL-3.0-or-later](LICENSE). You may use, modify and fork health-os; if you distribute it or
