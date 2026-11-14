@@ -2,7 +2,7 @@ import pytest
 
 from core import config
 from core.config import Settings
-from safety.crisis import _HOTLINES, crisis_response, is_crisis
+from safety.crisis import _HOTLINES, _PATTERNS, _norm, crisis_response, is_crisis
 
 
 @pytest.fixture(autouse=True)
@@ -22,6 +22,57 @@ def test_non_crisis_is_clean():
     assert not is_crisis("сьогодні болить голова і трохи втомився")
     assert not is_crisis("хочу записатись до лікаря")
     assert not is_crisis(None)
+
+
+@pytest.mark.parametrize("text", [
+    # uk
+    "хочу вмерти", "іноді думаю вбити себе", "вб’ю себе", "НЕ ХОЧУ ЖИТИ",
+    # ru — "не хочу жить" was missed until the pattern stopped requiring "больше"
+    "не хочу жить", "нет смысла жить", "хочу убить себя", "наложить на себя руки",
+    "хочу свести счёты с жизнью", "Лучше бы я умер",
+    # en
+    "I don't want to live anymore", "I don’t want to live", "thinking about killing myself",
+    "I want to take my own life", "I wish I was dead", "I want to hurt myself",
+    # es — the table from issue #31 and everyday variants
+    "quiero morir", "no quiero vivir más", "no quiero vivir mas", "quiero quitarme la vida",
+    "me quiero matar", "no tiene sentido vivir", "autolesionarme", "pienso en suicidarme",
+    "me quiero morir", "ya no quiero seguir viviendo", "voy a matarme",
+    "quiero acabar con mi vida", "no vale la pena vivir", "quiero hacerme daño",
+    "estaría mejor muerta",
+    # de
+    "ich will sterben", "Ich will nicht mehr leben", "ich bringe mich um",
+    "ich denke daran, mich umzubringen", "Selbstmord", "ich will mir das Leben nehmen",
+    # pl — with and without diacritics
+    "chcę umrzeć", "chce umrzec", "nie chcę już żyć", "nie chce juz zyc", "zabiję się",
+    "chcę się zabić", "myślę o samobójstwie", "chcę odebrać sobie życie",
+])
+def test_detects_crisis_phrases(text):
+    assert is_crisis(text), text
+
+
+@pytest.mark.parametrize("text", [
+    "me duele la cabeza y quiero dormir", "quiero vivir más sano", "no quiero comer más azúcar",
+    "mi abuelo murió de un infarto", "me corté el dedo cocinando",
+    "ich will besser schlafen", "ich will nicht mehr rauchen", "mein Knie ist verletzt",
+    "chcę żyć zdrowiej", "nie chcę już palić", "boli mnie głowa",
+    "I hurt my knee running", "I don't want to take statins", "I cut my finger cooking",
+    "не хочу пить таблетки", "хочу жить здоровее", "хочу краще спати",
+])
+def test_ordinary_messages_in_every_language_are_clean(text):
+    assert not is_crisis(text), text
+
+
+def test_spacing_and_line_breaks_do_not_hide_a_phrase():
+    assert is_crisis("quiero   morir")
+    assert is_crisis("не хочу\nжить")
+
+
+def test_patterns_are_written_in_normalized_form():
+    # is_crisis() matches against _norm(text), so a pattern with "ё" or a capital letter could
+    # never match — "свести счёты" sat in the list that way and caught nothing
+    assert _norm("Свести  счёты") == "свести счеты"
+    for pattern in _PATTERNS:
+        assert "ё" not in pattern and "’" not in pattern, pattern
 
 
 def test_response_has_hotlines_default_ua():

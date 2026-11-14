@@ -1,8 +1,8 @@
 """Crisis protocol (plan 4.6) — deterministic, independent of the LLM/API.
 
 A Telegram bot at 3am is de facto the first line. This can't be left to the LLM's mood.
-A local keyword/regex layer (zero dependencies) is the first net; an LLM classifier (Phase 4)
-sits on top. The fixed response with the hotlines (CRISIS_COUNTRY, default UA: 7333/103/112) must be
+A local keyword/regex layer (zero dependencies; uk/ru/en/es/de/pl) is the first net; an LLM
+classifier (Phase 4) sits on top. The fixed response with the hotlines (CRISIS_COUNTRY, default UA: 7333/103/112) must be
 delivered even with a dead API.
 
 Suicidality is NOT an observation: it doesn't go into trends/correlations/reports (handled
@@ -13,22 +13,65 @@ from __future__ import annotations
 import re
 import unicodedata
 
-# High-recall patterns (a false positive is better than a miss). uk/ru/en.
-_PATTERNS = [
-    r"не хоч(?:у|еться).{0,20}жити", r"немає сенсу жити", r"не бачу сенсу",
-    r"хочу померти", r"краще б я помер", r"краще не прокидатись",
-    r"покінчити з (собою|життям)", r"накласти на себе руки", r"звести рахунки з життям",
-    r"порізати себе", r"завдати собі шкоди", r"зробити собі боляче",
-    r"суїцид", r"суицид", r"самогубств",
-    r"не хочу больше жить", r"хочу умереть", r"покончить с собой", r"свести счёты",
-    r"kill myself", r"want to die", r"end my life", r"suicid", r"self[- ]?harm",
-    r"no reason to live", r"better off dead",
-]
+# High-recall patterns (a false positive is better than a miss), grouped by language.
+# Written in the form _norm() produces: lower case, "е" for "ё", a plain ' for any apostrophe,
+# single spaces. Spanish, German and Polish accept the unaccented spelling too ("mas", "zyc") —
+# people type without diacritics. Stems like "suicid" serve every language that shares them.
+_PATTERNS_BY_LANG = {
+    "uk": [
+        r"не хоч(?:у|еться).{0,20}жити", r"немає сенсу жити", r"не бачу сенсу",
+        r"хочу (?:померти|вмерти)", r"краще б я (?:помер|вмер)", r"краще не прокидатись",
+        r"покінчити з (?:собою|життям)", r"накласти на себе руки", r"звести рахунки з життям",
+        r"(?:вбити|убити|вб'ю|уб'ю) себе", r"себе (?:вбити|убити|вб'ю|уб'ю)",
+        r"порізати себе", r"завдати собі шкоди", r"зробити собі боляче",
+        r"суїцид", r"самогубств",
+    ],
+    "ru": [
+        r"не хоч(?:у|ется).{0,20}жить", r"нет смысла жить", r"не вижу смысла (?:жить|в жизни)",
+        r"хочу умереть", r"лучше бы я (?:умер|сдох)", r"лучше не просыпаться",
+        r"покончить с (?:собой|жизнью)", r"наложить на себя руки", r"свести счеты",
+        r"(?:убить|убью) себя", r"себя (?:убить|убью)",
+        r"порезать себя", r"причинить себе (?:вред|боль)",
+        r"суицид", r"самоубий",
+    ],
+    "en": [
+        r"kill(?:ing)? myself", r"want to die", r"wanna die", r"end(?:ing)? my (?:own )?life",
+        r"tak(?:e|ing) my (?:own )?life", r"(?:don'?t|do not) want to (?:live|be alive)",
+        r"wish i (?:was|were) dead", r"no reason to live", r"better off dead",
+        r"(?:to|wanna|gonna) (?:hurt|harm|cut) myself", r"(?:hurting|harming|cutting) myself",
+        r"suicid", r"self[- ]?harm",
+    ],
+    "es": [
+        r"(?:quiero|quisiera|deseo|ganas de) morir", r"me (?:quiero|quisiera) morir",
+        r"no quiero (?:seguir |continuar )?viv(?:ir|iendo)", r"sin ganas de vivir",
+        r"quitarme la vida", r"(?:acabar|terminar) con mi vida",
+        r"matarme", r"me (?:quiero|quisiera|voy a) matar",
+        r"no (?:tiene sentido|vale la pena) (?:seguir )?viv(?:ir|iendo)",
+        r"mi vida no tiene sentido", r"mejor muert[oa]",
+        r"autolesi", r"hacerme da[nñ]o", r"cortarme las (?:venas|mu[nñ]ecas)",
+    ],
+    "de": [
+        r"(?:will|m[oö]chte|moechte) (?:nur noch |einfach )?sterben",
+        r"nicht (?:mehr|l[aä]nger|laenger) leben", r"mich um(?:zu)?bringen", r"bringe? mich um",
+        r"mir das leben (?:zu )?nehmen", r"meinem leben ein ende",
+        r"keinen sinn mehr zu leben", r"lebensm[uü]de",
+        r"selbstmord", r"suizid", r"selbstverletz", r"mich (?:selbst )?(?:zu )?verletzen",
+    ],
+    "pl": [
+        r"chc[eę] umrze[cć]", r"nie chc[eę] (?:ju[zż] |d[lł]u[zż]ej |wi[eę]cej )*[zż]y[cć]",
+        r"nie ma sensu [zż]y[cć]", r"zabi(?:[cć]|j[eę]) si[eę]", r"si[eę] zabi[cć]",
+        r"odebra[cć] sobie [zż]ycie", r"sko[nń]czy[cć] ze sob[aą]",
+        r"zrobi[cć] sobie krzywd[eę]", r"samob[oó]j", r"samookalecz",
+    ],
+}
+_PATTERNS = [p for patterns in _PATTERNS_BY_LANG.values() for p in patterns]
 _COMPILED = [re.compile(p, re.IGNORECASE) for p in _PATTERNS]
+_APOSTROPHES = str.maketrans({"’": "'", "ʼ": "'", "`": "'", "‘": "'"})
 
 
 def _norm(text: str) -> str:
-    return unicodedata.normalize("NFC", text.replace("ё", "е")).lower()
+    text = unicodedata.normalize("NFC", text).lower().replace("ё", "е")
+    return " ".join(text.translate(_APOSTROPHES).split())
 
 
 def is_crisis(text: str | None) -> bool:
