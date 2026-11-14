@@ -20,6 +20,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   `observation_types.name_uk` need to use the new tables (#52).
 
 ### Fixed
+- Crisis keyword detection missed everyday phrasing: Spanish had only the `suicid` stem
+  ("quiero morir", "no quiero vivir más", "me quiero matar" went undetected), German and Polish
+  had nothing, and Russian "не хочу жить" and English "I don't want to live" slipped through.
+  All six languages now have their own pattern lists, Spanish, German and Polish also match
+  without diacritics, and extra spaces, line breaks and typographic apostrophes no longer hide
+  a phrase. "свести счёты" never matched because the text was normalized to "е" and the
+  pattern was not (#31).
 - With the database unreachable (e.g. Docker Desktop stopped), `crisis_resources` failed instead of returning its fixed response; it no longer depends on the database. Every other tool now answers "database unreachable" with a hint instead of a bare "Error executing tool".
 - Backups were silently skipped when Docker Desktop wasn't running ("Cannot connect to the
   Docker daemon"): `backup.sh` and `restore_test.sh` now start Docker Desktop on macOS and wait

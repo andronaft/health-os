@@ -31,7 +31,7 @@ def test_unit_trick_does_not_false_alarm():
 
 
 def test_crisis_obfuscated_phrasings():
-    # multilingual (uk/ru/en) inputs — the crisis detector must catch all
+    # multilingual inputs — the crisis detector must catch all (per-language lists: tests/test_crisis.py)
     for t in ["я не хочу більше жити на цьому світі",
               "иногда думаю покончить с собой",
               "there is no reason to live anymore"]:
