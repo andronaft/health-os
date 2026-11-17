@@ -12,6 +12,11 @@ import {
   pendingName, pendingNote, profileLine, profileProblems, readoutAt, sparklineOption, staleText,
   tileEmptyLines, tileHeadline, tileNote,
 } from "../web/static/pages/overview-model.js";
+import {
+  baselineText, cellText, detailOption, filterMarkers, historyText, isOutOfRange, pointText,
+  qualitative, qualitativeOption, sparkPoints, specimenOptions, specimenWord, tableRows, tn, trendLines,
+  unconverted,
+} from "../web/static/pages/labs-model.js";
 import { t } from "../web/static/strings.js";
 
 test("the stored statuses have their own word; 'normal' is shown as 'in range'", () => {
@@ -226,4 +231,158 @@ test("every page has a title in the table, and t() fills in values", () => {
   for (const page of PAGES) assert.notEqual(t(page.title), page.title);
   assert.equal(t("table.count", { shown: 0, total: 3 }), "0 of 3 rows");
   assert.equal(t("no.such.key"), "no.such.key");
+});
+
+// ---- Labs (#55) -------------------------------------------------------------------------------
+
+const point = (at, value, extra = {}) => ({
+  at,
+  value,
+  original: { value, comparator: null, text: null, unit: "mmol/L", ref_min: 3.9, ref_max: 5.6 },
+  range: { min: 3.9, max: 5.6, unconverted: false },
+  status: "normal",
+  pending: false,
+  ...extra,
+});
+
+const marker = (code, status, specimen = "serum") => ({ code, name: code, status, specimen, spark: [] });
+
+test("the out-of-range filter keeps low, high and critical; the specimen filter one specimen", () => {
+  const markers = [marker("a", "normal"), marker("b", "high"), marker("c", "low", "whole_blood"),
+    marker("d", "critical"), marker("e", null, null)];
+  assert.deepEqual(filterMarkers(markers, { outOfRangeOnly: true }).map((m) => m.code), ["b", "c", "d"]);
+  assert.deepEqual(filterMarkers(markers, { specimen: "whole_blood" }).map((m) => m.code), ["c"]);
+  assert.deepEqual(filterMarkers(markers, { specimen: "" }).length, 5);
+  assert.equal(isOutOfRange(marker("x", undefined)), false); // no status is not "out of range" …
+  assert.equal(specimenWord(null), "Other"); // … and no specimen is still a group
+  assert.equal(specimenWord("whole_blood"), "Whole blood");
+  assert.equal(specimenWord("sweat"), "sweat"); // added later: its code, not a key
+  assert.deepEqual(specimenOptions(markers).map((o) => o.code), ["", "serum", "whole_blood"]);
+});
+
+test("the history column counts values and says since when", () => {
+  assert.equal(historyText({ n: 5, first_at: "2024-05-31T00:00:00+00:00" }), "5 since 2024-05-31");
+  assert.equal(historyText({ n: 1, first_at: "2026-01-02T00:00:00+00:00", at: "2026-01-02T00:00:00+00:00" }), "1, on 2026-01-02");
+});
+
+test("sparkline points: by date across, higher values up, a flat or single series in the middle", () => {
+  const pts = sparkPoints([{ at: "2026-01-01", value: 1 }, { at: "2026-01-03", value: 3 }, { at: "2026-01-02", value: 2 }], 100, 20, 0);
+  assert.deepEqual(pts, [[0, 20], [100, 0], [50, 10]]);
+  assert.deepEqual(sparkPoints([{ at: "2026-01-01", value: 7 }], 100, 20), [[50, 10]]);
+  assert.deepEqual(sparkPoints([{ at: "2026-01-01", value: 7 }, { at: "2026-01-02", value: 7 }], 100, 20, 0).map(([, y]) => y), [10, 10]);
+  assert.deepEqual(sparkPoints([], 100, 20), []);
+});
+
+test("a matrix cell shows the value without its unit, with its comparator", () => {
+  assert.equal(cellText({ value: 5.2, comparator: null, text: null, unit: "mmol/L" }), "5.2");
+  assert.equal(cellText({ value: 5, comparator: "<", unit: "mg/L" }), "<5");
+  assert.equal(cellText({ value: null, text: "negative", unit: null }), "negative");
+  assert.equal(cellText(undefined), "");
+});
+
+test("the trend says what it was computed on, and nothing with too few values", () => {
+  const base = { n: 6, min_n: 5, from: "2024-01-01 00:00:00+00:00", to: "2026-01-01 00:00:00+00:00" };
+  assert.deepEqual(trendLines({ ...base, direction: "increasing", p: 0.0123, slope_per_year: 0.21345 }, "mmol/L"), [
+    "Rising over 6 approved values, from 2024-01-01 to 2026-01-01.",
+    "Mann-Kendall test: p ≈ 0.012.",
+    "Theil–Sen slope: +0.213 mmol/L per year.",
+  ]);
+  assert.equal(trendLines({ ...base, direction: "decreasing", p: 0.0001, slope_per_year: -2 }, "g/L")[1], "Mann-Kendall test: p < 0.001.");
+  assert.equal(trendLines({ ...base, direction: "decreasing", p: 0.0001, slope_per_year: -2 }, "g/L")[2], "Theil–Sen slope: -2 g/L per year.");
+  assert.match(trendLines({ ...base, direction: "no_trend", p: 0.4, slope_per_year: 0 }, "x")[0], /^No statistically significant change/);
+  assert.deepEqual(trendLines({ ...base, n: 2, direction: "no_trend", p: null, slope_per_year: null }, "x"),
+    ["Not enough approved values for a trend: 2, at least 5 are needed."]);
+  assert.deepEqual(trendLines(null, "x"), ["Not enough approved values for a trend: 0, at least 5 are needed."]);
+});
+
+test("the baseline is described as your own history, or says why there is none", () => {
+  assert.equal(baselineText({ n: 3, min_n: 5, mean: null, low: null, high: null, sigmas: 2 }, "mmol/L"),
+    "A personal baseline needs at least 5 approved values; there are 3.");
+  assert.equal(baselineText({ n: 6, min_n: 5, mean: 5.0, low: 4.4, high: 5.6, sigmas: 2 }, "mmol/L"),
+    "Mean ± 2σ of your approved values: 4.4–5.6 mmol/L (mean 5, 6 values).");
+  assert.match(t("labs.baseline.note"), /not what is healthy/);
+});
+
+test("the tooltip gives the form's value and range, and says a pending value is not a fact", () => {
+  const converted = point("2026-01-02T00:00:00+00:00", 5.27, {
+    original: { value: 95, comparator: null, text: null, unit: "mg/dL", ref_min: 70, ref_max: 100 },
+    range: { min: 3.89, max: 5.55, unconverted: false },
+  });
+  assert.equal(pointText(converted, "mmol/L"),
+    "2026-01-02: 5.27 mmol/L\non the form: 95 mg/dL\nrange on the form: 70–100 mg/dL\nin range");
+  // same unit: no "on the form" line repeating the value
+  assert.equal(pointText(point("2026-01-02", 5, { status: "high" }), "mmol/L"),
+    "2026-01-02: 5 mmol/L\nrange on the form: 3.9–5.6 mmol/L\nhigh");
+  const pending = point("2026-01-03", 2, { pending: true, status: "low" });
+  assert.match(pointText(pending, "mmol/L"), /pending: not reviewed, not a fact yet$/);
+  assert.doesNotMatch(pointText(pending, "mmol/L"), /\blow\b/);
+  const noRange = point("2026-01-04", 5, { original: { value: 5, unit: "mmol/L", ref_min: null, ref_max: null }, range: null });
+  assert.match(pointText(noRange, "mmol/L"), /no range on the form/);
+  const odd = point("2026-01-05", 5, { range: { min: null, max: null, unconverted: true } });
+  assert.match(pointText(odd, "mmol/L"), /cannot be drawn in this unit/);
+});
+
+test("the detail chart: a band per approved point, pending values hollow and apart", () => {
+  const data = {
+    name: "Glucose",
+    unit: "mmol/L",
+    points: [
+      point("2026-01-01", 5.0, { range: { min: 3.9, max: 5.6, unconverted: false } }),
+      point("2026-02-01", 5.4, { range: { min: 4.1, max: null, unconverted: false } }),
+      point("2026-03-01", 5.1, { range: { min: null, max: null, unconverted: true } }),
+      point("2026-04-01", null, { original: { value: 95, unit: "furlongs" } }), // not convertible
+    ],
+    pending: [point("2026-05-01", 9.9, { pending: true })],
+    baseline: { n: 3, min_n: 5, mean: null, low: null, high: null, sigmas: 2 },
+  };
+  const option = detailOption(data, { colors: { band: "green", baseline: "orange", pending: "grey" } });
+  const [line, bands, pending] = option.series;
+  assert.ok(line.z > bands.z); // the values are drawn over the ranges
+  // ranges differ between labs: one band per point, at that point, never one for the whole chart
+  assert.deepEqual(bands.data.map(([x, low, high]) => [x, low, Number.isNaN(high) ? "open" : high]), [
+    [Date.parse("2026-01-01"), 3.9, 5.6],
+    [Date.parse("2026-02-01"), 4.1, "open"],
+  ]);
+  assert.equal(bands.silent, true);
+  assert.deepEqual(line.data.map((d) => d.value[1]), [5.0, 5.4, 5.1]);
+  assert.equal(detailOption(data, { baseline: true }).series[0].markArea, undefined); // too few values
+  // hollow on any background: no fill, a grey ring
+  assert.deepEqual(pending.itemStyle, { color: "transparent", borderColor: "grey", borderWidth: 2 });
+  assert.equal(pending.label.formatter, "unverified");
+  assert.deepEqual(pending.data.map((d) => d.value[1]), [9.9]);
+  assert.ok(line.data.every((d) => !d.point.pending) && pending.data.every((d) => d.point.pending));
+  assert.equal(option.yAxis.name, "mmol/L");
+  assert.match(option.tooltip.formatter({ data: pending.data[0] }), /not a fact/);
+  assert.equal(unconverted(data.points).length, 1);
+});
+
+test("the baseline goes on the chart only when asked and when there is one", () => {
+  const data = {
+    name: "Glucose",
+    unit: "mmol/L",
+    points: [point("2026-01-01", 5.0)],
+    pending: [],
+    baseline: { n: 6, min_n: 5, mean: 5.0, low: 4.4, high: 5.6, sigmas: 2 },
+  };
+  assert.equal(detailOption(data).series[0].markArea, undefined);
+  const on = detailOption(data, { baseline: true, colors: { band: "g", baseline: "o" } }).series[0];
+  assert.deepEqual(on.markArea.data, [[{ yAxis: 4.4 }, { yAxis: 5.6 }]]);
+  assert.deepEqual(on.markLine.data, [{ yAxis: 5.0 }]);
+  assert.equal(detailOption(data).series.length, 2); // no pending series when nothing is pending
+});
+
+test("text results go on a categorical axis; the values table is newest first", () => {
+  const text = (at, value, pending = false) => ({ at, value: null, pending, original: { value: null, text: value }, status: null });
+  const data = { name: "HBsAg", unit: null, points: [text("2025-01-01", "negative"), text("2026-01-01", "positive")], pending: [text("2026-06-01", "negative", true)] };
+  assert.equal(qualitative(data.points).length, 2);
+  const option = qualitativeOption(data, { colors: { pending: "grey" } });
+  assert.deepEqual(option.yAxis.data, ["negative", "positive"]);
+  assert.equal(option.series[1].itemStyle.color, "transparent");
+  assert.deepEqual(tableRows(data).map((row) => row.at), ["2026-06-01", "2026-01-01", "2025-01-01"]);
+});
+
+test("counts read as one or many", () => {
+  assert.equal(tn("labs.pending_note", { n: 1 }).startsWith("1 lab value is"), true);
+  assert.equal(tn("labs.pending_note", { n: 2 }).startsWith("2 lab values are"), true);
+  assert.equal(tn("labs.detail.unconverted", { n: 1, unit: "g/L" }).startsWith("1 value could not"), true);
 });

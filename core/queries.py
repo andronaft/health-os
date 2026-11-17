@@ -142,6 +142,7 @@ def trend(conn, uid: str, type_code: str, days: int = 1825) -> dict:
     return {"type_code": code, "n": t.n, "direction": t.direction,
             "slope_per_year": (round(t.slope_per_year, 4)
                                if t.slope_per_year is not None else None),
+            "p": round(t.p_approx, 4) if t.p_approx is not None else None,
             "detail": t.detail,
             "from": str(rows[0][1]) if rows else None,
             "to": str(rows[-1][1]) if rows else None,

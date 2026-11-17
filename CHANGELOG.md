@@ -78,6 +78,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   still under review flagged. It says "N of M recorded markers in range" and what the rest are,
   never a global verdict. New read-only `GET /api/v1/overview`. It reads the same rows as
   `get_health_summary` (`core.health_summary.read_facts`) in one read-only snapshot (#54).
+- Browser UI Labs page (preview). The marker table lists every lab marker's latest approved
+  value with its status, the range on its form, a sparkline of the last 12 values, how many
+  values there are since when, and how many wait for review; filters for "out of range only"
+  and specimen, plus the text filter. Each marker has its own page: a chart in the marker's
+  canonical unit where every value sits over the range printed on its own form (ranges differ
+  between labs; a range in another unit is converted like the value, or left out if it can't
+  be), pending values drawn hollow, grey and labelled "unverified", the trend (Mann-Kendall
+  p, Theil–Sen slope per year, the same numbers as `get_trend`), an optional personal baseline
+  (mean ± 2σ, at least 5 approved values), text results on their own axis, and a table of every
+  value with the form's value, unit and range. A panel matrix shows markers × the latest 12
+  days with a lab value, coloured by status. Pending values count in no table, matrix, trend
+  or baseline. New read-only `GET /api/v1/labs` and `GET /api/v1/labs/{code}`; `get_trend` now
+  also returns `p` (#55).
 
 ## [0.3.0] — 2026-10-15
 

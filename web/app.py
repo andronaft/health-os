@@ -29,6 +29,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from core.db import engine
+from web.labs import lab_index, lab_marker
 from web.overview import overview as read_overview
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -137,13 +138,30 @@ def read_only_snapshot():
         yield conn
 
 
-def overview(request):  # not async: Starlette runs it in a thread, so the query can't block others
+def _read(request, build):
+    """Run build(conn, lang) on a read-only snapshot; None from it is a 404. The handlers that
+    call this are not async: Starlette runs them in a thread, so a query can't block others."""
     lang = request.query_params.get("lang", "en")
     try:
         with read_only_snapshot() as conn:
-            return ApiResponse(read_overview(conn, lang))
+            data = build(conn, lang)
     except OperationalError:
         return JSONResponse({"error": "database unreachable"}, status_code=503)
+    if data is None:
+        return JSONResponse({"error": "no such marker"}, status_code=404)
+    return ApiResponse(data)
+
+
+def overview(request):
+    return _read(request, read_overview)
+
+
+def labs(request):
+    return _read(request, lab_index)
+
+
+def lab(request):
+    return _read(request, lambda conn, lang: lab_marker(conn, request.path_params["code"], lang))
 
 
 def create_app(token: str) -> Starlette:
@@ -153,6 +171,8 @@ def create_app(token: str) -> Starlette:
         Route("/", index, methods=["GET"]),
         Route("/api/v1/health", health, methods=["GET"]),
         Route("/api/v1/overview", overview, methods=["GET"]),
+        Route("/api/v1/labs", labs, methods=["GET"]),
+        Route("/api/v1/labs/{code}", lab, methods=["GET"]),
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]
     return Starlette(routes=routes, middleware=[

@@ -30,11 +30,13 @@ export function statusKey(status) {
 
 export const statusWord = (status) => t(`status.${statusKey(status)}`);
 
+export const statusIcon = (status) => STATUS_ICONS[statusKey(status)];
+
 /** The word and the icon say it; the colour only repeats it. */
 export function statusPill(status) {
   const key = statusKey(status);
   return el("span", { class: "pill", "data-status": key },
-    el("span", { class: "pill-icon", "aria-hidden": "true" }, STATUS_ICONS[key]),
+    el("span", { class: "pill-icon", "aria-hidden": "true" }, statusIcon(key)),
     statusWord(key));
 }
 

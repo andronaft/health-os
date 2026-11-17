@@ -86,7 +86,8 @@ def test_every_local_file_the_ui_refers_to_is_served(client):
 def test_our_files_name_nothing_external():
     for path in OUR_FILES:
         text = path.read_text()
-        assert not re.search(r"https?://(?!127\.0\.0\.1)", text), path
+        # the SVG namespace is a name for createElementNS, never fetched
+        assert not re.search(r"https?://(?!127\.0\.0\.1|www\.w3\.org/2000/svg\b)", text), path
         assert not re.search(r"""(?:src|href)=["']//""", text), path
     css = (STATIC / "styles.css").read_text()
     assert "@import" not in css and "url(" not in css
@@ -119,7 +120,7 @@ def test_css_tokens_are_defined_and_have_both_themes():
 def test_every_word_the_ui_uses_is_in_the_table():
     table = (STATIC / "strings.js").read_text()
     keys = set(re.findall(r'^\s*"([\w.]+)":', table, re.M))
-    prefixes = "nav|theme|status|table|empty|error|connection|overview"
+    prefixes = "nav|theme|status|table|empty|error|connection|overview|labs"
     used = set()
     for script in OUR_SCRIPTS:
         if script.name != "strings.js":
