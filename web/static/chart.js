@@ -10,7 +10,8 @@ const resizer = new ResizeObserver((entries) => {
   for (const { target } of entries) live.get(target)?.resize();
 });
 
-function tokenColor(name) {
+/** A CSS colour token's current value, for what paints on a canvas. */
+export function tokenColor(name) {
   const probe = document.createElement("span");
   probe.style.color = `var(${name})`; // setting it from a script is fine under the CSP
   document.body.append(probe);
