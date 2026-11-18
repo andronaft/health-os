@@ -182,10 +182,25 @@ export function detailOption(data, { baseline = false, colors = {} } = {}) {
         const top = Number.isFinite(high) ? api.coord([x, high])[1] : sys.y;
         const bottom = Number.isFinite(low) ? api.coord([x, low])[1] : sys.y + sys.height;
         const [cx] = api.coord([x, Number.isFinite(low) ? low : high]);
+        const left = cx - BAND_WIDTH / 2;
+        // a faint fill alone is under 3:1 against the background: the range's own limits get a
+        // solid edge, an open side (no limit) none
+        const edge = (y) => ({
+          type: "line",
+          shape: { x1: left, y1: y, x2: left + BAND_WIDTH, y2: y },
+          style: { stroke: colors.band, lineWidth: 1.5 },
+        });
         return {
-          type: "rect",
-          shape: { x: cx - BAND_WIDTH / 2, y: top, width: BAND_WIDTH, height: bottom - top },
-          style: { fill: colors.band, opacity: 0.22 },
+          type: "group",
+          children: [
+            {
+              type: "rect",
+              shape: { x: left, y: top, width: BAND_WIDTH, height: bottom - top },
+              style: { fill: colors.band, opacity: 0.18 },
+            },
+            Number.isFinite(high) && edge(top),
+            Number.isFinite(low) && edge(bottom),
+          ].filter(Boolean),
         };
       },
     },

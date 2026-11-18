@@ -55,7 +55,7 @@ def test_stage_review_approve_cycle():
         assert all(float(r["value_canonical"]) != 5.8 for r in before["rows"])
         # but visible in pending
         pending = json.loads(tools.list_pending_reviews())
-        assert any(r["type_code"] == "cholesterol_total" for r in pending)
+        assert any(r["type_code"] == "cholesterol_total" for r in pending["rows"])
 
         # explicit approval
         appr = json.loads(write_tools.approve_staged_source(sid))

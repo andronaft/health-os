@@ -17,13 +17,15 @@ AGG_THRESHOLD_DAYS = 90   # longer windows → weekly buckets in observations()
 MAX_DAYS = 36500          # 100 years is "all time"; far larger windows overflow make_interval
 SERIES_MAX_ROWS = 5000    # a chart's points (a year of daily wearable data is ~365)
 
-# name → view for the simple per-user lists
+# name → (view, ORDER BY) for the simple per-user lists. A fixed order makes the row cap drop
+# the oldest rows: without one, LIMIT returned whichever rows Postgres met first, and in the
+# review queue that was the newest values. id breaks ties so the order is stable.
 VIEWS = {
-    "medications": "v_medications_current",
-    "diagnoses": "v_diagnoses",
-    "allergies": "v_allergies",
-    "habits": "v_habits",
-    "pending": "v_observations_pending",
+    "medications": ("v_medications_current", "start_date DESC NULLS LAST, medication_name, id"),
+    "diagnoses": ("v_diagnoses", "diagnosed_at DESC NULLS LAST, diagnosis_name, id"),
+    "allergies": ("v_allergies", "allergen, id"),
+    "habits": ("v_habits", "start_date DESC NULLS LAST, habit_type, id"),
+    "pending": ("v_observations_pending", "effective_at DESC, raw_name, id"),
 }
 
 
@@ -190,6 +192,55 @@ def markers(conn, uid: str, category: str | None = None) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+OUT_OF_RANGE = ("low", "high", "critical")
+
+
+def open_results(conn, uid: str, days: int = MAX_DAYS) -> dict:
+    """Lab markers whose latest approved value is out of range — nothing approved has measured
+    them since. Each says since when it has been out of range in a row (`streak`: how many
+    consecutive values), and whether a newer value of it is waiting for review: that one is not
+    a fact yet, so its number is not shown. Lab markers only: a single high blood-pressure
+    reading or a short night is no result to follow up. Oldest first — the longest unanswered."""
+    rows = conn.execute(
+        text(
+            """WITH ranked AS (
+                    SELECT type_code, effective_at, value_numeric, comparator, value_text, unit,
+                           ref_min, ref_max, status,
+                           row_number() OVER (PARTITION BY type_code
+                                              ORDER BY effective_at DESC) AS rn
+                    FROM v_observations
+                    WHERE user_id=:u AND category = 'lab'
+                      AND effective_at >= now() - make_interval(days => :d)),
+                runs AS (  -- the first value, newest first, that breaks the out-of-range run
+                    SELECT type_code, min(rn) FILTER (
+                               WHERE status IS NULL OR status NOT IN ('low','high','critical')
+                           ) AS break_rn, count(*) AS n
+                    FROM ranked GROUP BY type_code)
+               SELECT l.type_code, l.effective_at AS at, l.value_numeric, l.comparator,
+                      l.value_text, l.unit, l.ref_min, l.ref_max, l.status,
+                      COALESCE(r.break_rn - 1, r.n) AS streak,
+                      s.effective_at AS since,
+                      EXISTS (SELECT 1 FROM v_observations_pending p
+                              WHERE p.user_id=:u AND p.type_code = l.type_code
+                                AND p.effective_at > l.effective_at) AS newer_pending
+               FROM ranked l
+               JOIN runs r USING (type_code)
+               JOIN ranked s ON s.type_code = l.type_code
+                            AND s.rn = COALESCE(r.break_rn - 1, r.n)
+               WHERE l.rn = 1 AND l.status IN ('low','high','critical')
+               ORDER BY (l.status = 'critical') DESC, l.effective_at"""
+        ),
+        {"u": uid, "d": clamp_days(days)},
+    ).mappings().all()
+    seen = conn.execute(
+        text("""SELECT count(DISTINCT type_code) FROM v_observations
+                WHERE user_id=:u AND category = 'lab'
+                  AND effective_at >= now() - make_interval(days => :d)"""),
+        {"u": uid, "d": clamp_days(days)},
+    ).scalar()
+    return {"open": [dict(r) for r in rows], "lab_markers_seen": seen}
+
+
 def timeline(conn, uid: str, days: int = 3650, limit: int = MAX_ROWS) -> list[dict]:
     """Health events, newest first; a panel without a type is titled "lab panel"."""
     rows = conn.execute(
@@ -247,11 +298,14 @@ def marker_names(conn, lang: str) -> dict[str, str]:
     return {code: name for code, _, name in sorted(rows, key=lambda r: rank[r[1]])}
 
 
-def view_rows(conn, uid: str, name: str, limit: int = MAX_ROWS) -> list[dict]:
-    """The user's rows of one of VIEWS (medications, diagnoses, allergies, habits, pending)."""
-    view = VIEWS[name]  # KeyError for anything else: never interpolate a caller's string
+def view_rows(conn, uid: str, name: str, limit: int = MAX_ROWS) -> dict:
+    """The user's rows of one of VIEWS (medications, diagnoses, allergies, habits, pending), in
+    the view's fixed order: {"rows": [...], "truncated": bool}. One extra row is fetched, so a
+    capped list says it is capped instead of passing for the whole list."""
+    view, order = VIEWS[name]  # KeyError for anything else: never interpolate a caller's string
+    limit = max(1, int(limit))
     rows = conn.execute(
-        text(f"SELECT * FROM {view} WHERE user_id=:u LIMIT :lim"),
-        {"u": uid, "lim": max(1, int(limit))},
+        text(f"SELECT * FROM {view} WHERE user_id=:u ORDER BY {order} LIMIT :lim"),
+        {"u": uid, "lim": limit + 1},
     ).mappings().all()
-    return [dict(r) for r in rows]
+    return {"rows": [dict(r) for r in rows[:limit]], "truncated": len(rows) > limit}

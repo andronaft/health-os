@@ -6,12 +6,21 @@ export.zip is a CUMULATIVE full snapshot; every import contains all previous sam
 device_alert ≠ sample: "possible atrial fibrillation"/irregular rhythm/SpO₂ alert/fall —
 event flags for the red-flag logic (reliability marker: consumer_grade, the AI does not over-interpret).
 
+Units: every quantity Record carries its own `unit` attribute, and it follows the phone's
+locale — a US iPhone exports body mass in "lb" and temperature in "degF". The value is
+converted to the type's canonical unit (kg, °C, bpm, %); a record whose unit isn't in
+`HK_UNITS` for its type is skipped and counted, never stored as if it were canonical
+(180 lb stored as 180 kg, a 103.1 °F fever stored as 103.1 °C). A record without a unit is
+skipped the same way: Apple always writes one, so its absence means we can't trust the number.
+
 Pure functions over the XML string; DB writes are separate (importers, in Phase 3 in full).
 """
 from __future__ import annotations
 
 import io
-from dataclasses import dataclass
+import math
+from collections import Counter
+from dataclasses import dataclass, field
 from datetime import datetime
 from xml.etree import ElementTree as ET
 
@@ -23,6 +32,20 @@ HK_QUANTITY = {
     "HKQuantityTypeIdentifierOxygenSaturation": ("spo2", "avg"),
     "HKQuantityTypeIdentifierBodyMass": ("body_weight", "last"),
     "HKQuantityTypeIdentifierBodyTemperature": ("body_temp", "avg"),
+}
+
+# type_code → {Apple unit string: conversion to the canonical unit}. Only units Apple writes
+# for these types; anything else is reported, not guessed.
+HK_UNITS = {
+    "heart_rate": {"count/min": lambda v: v},
+    "resting_hr": {"count/min": lambda v: v},
+    "steps": {"count": lambda v: v},
+    # Apple stores SpO2 as a fraction 0..1 with unit "%"; older exports may hold 0..100
+    "spo2": {"%": lambda v: v * 100.0 if v <= 1.0 else v},
+    "body_weight": {"kg": lambda v: v, "g": lambda v: v / 1000.0,
+                    "lb": lambda v: v * 0.45359237, "st": lambda v: v * 6.35029318},
+    "body_temp": {"degC": lambda v: v, "degF": lambda v: (v - 32.0) * 5.0 / 9.0,
+                  "K": lambda v: v - 273.15},
 }
 
 # category events → alert type
@@ -52,9 +75,17 @@ def _parse_ts(s: str) -> datetime:
     return datetime.strptime(s, "%Y-%m-%d %H:%M:%S %z")
 
 
-def parse_export(xml: str) -> tuple[list[Sample], list[DeviceAlert]]:
-    samples: list[Sample] = []
-    alerts: list[DeviceAlert] = []
+@dataclass
+class ParsedExport:
+    samples: list[Sample] = field(default_factory=list)
+    alerts: list[DeviceAlert] = field(default_factory=list)
+    # (type_code, unit as written or None) → number of records skipped for an unknown unit
+    skipped_units: Counter = field(default_factory=Counter)
+
+
+def parse(xml: str) -> ParsedExport:
+    """Parses export.xml; quantity values come out in canonical units (see `HK_UNITS`)."""
+    out = ParsedExport()
     for _event, el in ET.iterparse(io.StringIO(xml), events=("end",)):
         if el.tag != "Record":
             continue
@@ -67,13 +98,24 @@ def parse_export(xml: str) -> tuple[list[Sample], list[DeviceAlert]]:
                 el.clear()
                 continue
             type_code = HK_QUANTITY[rtype][0]
-            if type_code == "spo2" and val <= 1.0:   # Apple stores a fraction 0..1
-                val *= 100.0
-            samples.append(Sample(type_code, _parse_ts(start), val))
+            unit = el.get("unit")
+            convert = HK_UNITS[type_code].get(unit)
+            if convert is None:
+                out.skipped_units[(type_code, unit)] += 1
+            else:
+                val = convert(val)
+                if math.isfinite(val):
+                    out.samples.append(Sample(type_code, _parse_ts(start), val))
         elif rtype in HK_ALERTS and start:
-            alerts.append(DeviceAlert(HK_ALERTS[rtype], _parse_ts(start)))
+            out.alerts.append(DeviceAlert(HK_ALERTS[rtype], _parse_ts(start)))
         el.clear()
-    return samples, alerts
+    return out
+
+
+def parse_export(xml: str) -> tuple[list[Sample], list[DeviceAlert]]:
+    """(samples, alerts) — `parse` without the skipped-unit report."""
+    p = parse(xml)
+    return p.samples, p.alerts
 
 
 def daily_aggregates(samples: list[Sample]) -> list[dict]:

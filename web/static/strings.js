@@ -115,6 +115,8 @@ const EN = {
   "overview.pending.flag_unmapped": "Marker not recognized: not checked for critical values until it is mapped",
   "overview.out.title": "Latest values out of range: {n}",
   "overview.out.none": "No latest value is out of its range, among the {n} markers that have a range to compare with.",
+  "overview.out.streak": "Out of range {n} times in a row, since {date}",
+  "overview.out.newer_pending": "A newer value is under review",
   "overview.out.no_ranges": "No marker has a range to compare with yet.",
   "overview.screening.title": "Overdue screenings: {n}",
   "overview.screening.title_unknown": "Overdue screenings: unknown",

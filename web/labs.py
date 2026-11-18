@@ -151,7 +151,7 @@ def band(row, canonical_unit: str | None, conversions: dict) -> dict | None:
     low, high = _number(row["ref_min"]), _number(row["ref_max"])
     if low is None and high is None:
         return None
-    unit = canonicalize_unit(row["unit"])
+    unit = canonicalize_unit(row["unit"], canonical_unit)
     if canonical_unit is None or unit == canonical_unit:
         factor, offset = 1.0, 0.0
     elif unit in conversions:

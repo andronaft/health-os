@@ -143,12 +143,15 @@ def get_timeline(days: int = 3650) -> str:
         return json.dumps(q.timeline(conn, uid, days), default=str, ensure_ascii=False)
 
 
-def _simple_view(name: str) -> str:
+def _simple_view(name: str, *, with_truncated: bool = False) -> str:
+    """A bare list for the short lists (medications, diagnoses…), as before; with_truncated
+    gives {"rows", "truncated"} for the review queue, which can outgrow the 200-row cap."""
     with engine.connect() as conn:
         uid = _user_id(conn)
         if not uid:
             return _no_user_error()
-        return json.dumps(q.view_rows(conn, uid, name), default=str, ensure_ascii=False)
+        out = q.view_rows(conn, uid, name)
+    return json.dumps(out if with_truncated else out["rows"], default=str, ensure_ascii=False)
 
 
 def get_medications() -> str:
@@ -168,7 +171,7 @@ def get_habits() -> str:
 
 
 def list_pending_reviews() -> str:
-    return _simple_view("pending")
+    return _simple_view("pending", with_truncated=True)
 
 
 
@@ -182,6 +185,25 @@ def get_trend(type_code: str, days: int = 1825) -> str:
         if not uid:
             return _no_user_error()
         return json.dumps(q.trend(conn, uid, type_code, days), ensure_ascii=False)
+
+
+def get_open_results(days: int = MAX_DAYS) -> str:
+    """Lab markers whose latest approved value is out of range, with nothing approved since."""
+    with engine.connect() as conn:
+        uid = _user_id(conn)
+        if not uid:
+            return _no_user_error()
+        out = q.open_results(conn, uid, days)
+    rows = [{k: v for k, v in r.items() if k != "newer_pending"}
+            | {"newer_result_awaiting_review": r["newer_pending"]} for r in out["open"]]
+    return json.dumps({
+        "open": rows,
+        "lab_markers_seen": out["lab_markers_seen"],
+        "note": ("Each marker's latest APPROVED value is out of range and nothing approved has "
+                 "measured it since; streak = how many values in a row were out of range. A "
+                 "newer value awaiting review is not a fact yet, so its number is left out. "
+                 "Only what has been entered: a re-test done elsewhere is not known here."),
+    }, default=str, ensure_ascii=False)
 
 
 def get_anomalies(type_code: str = "", days: int = 90, z_threshold: float = 2.0) -> str:
@@ -358,12 +380,18 @@ def prepare_doctor_visit(specialty: str = "") -> str:
                  "AND deleted_at IS NULL"),
             {"u": uid},
         ).scalar()
+        still_open = q.open_results(conn, uid)["open"] if uid else []
     screening = _json.loads(get_screening_recommendations())
     due = [r for r in screening.get("recommendations", []) if r["status"] in ("due", "overdue")]
     return json.dumps({
         "specialty": specialty or None,
         "summary": summary,
         "recent_abnormal": [dict(r) for r in abnormal],
+        # recent_abnormal includes values re-measured in range since; these were not
+        "still_out_of_range": [
+            {"code": r["type_code"], "status": r["status"], "measured_at": r["at"],
+             "out_of_range_since": r["since"], "values_in_a_row": r["streak"],
+             "newer_result_awaiting_review": r["newer_pending"]} for r in still_open],
         "screening_due": due,
         "pending_review_count": pending,
         "disclaimer": "This is a preparation package, not a diagnosis. Discuss with a doctor.",
@@ -382,7 +410,6 @@ def get_weekly_report() -> str:
 
 
 # ---------------------------------------------------------------- safety tools
-_PARACETAMOL_NAMES = ("paracetamol", "парацетамол", "acetaminophen", "ацетамінофен", "ацетаминофен")
 _BIOTIN_NAMES = ("biotin", "біотин", "биотин", "vitamin b7", "вітамін b7")
 
 
@@ -401,13 +428,18 @@ def medication_safety(current_meds: list[dict], paracetamol_products: list[dict]
 
     Interactions are always refused — the LLM is not an interaction engine. What CAN be computed:
     the total daily paracetamol across products and biotin interference with immunoassays.
-    Products not passed explicitly are taken from the current medication list.
+    Products not passed explicitly are taken from the current medication list: recorded
+    paracetamol is always counted, an explicit product replaces only the recorded entry of the
+    same name. Explicit products used to replace the whole list — Paracetamol 1 g × 4 on record
+    plus Frenadol 650 mg × 3 passed in came out as 1950 mg "ok" instead of 5950 mg.
     """
     from safety.interactions import (
         _BIOTIN_AFFECTED,
         biotin_interference_warning,
         check_paracetamol_load,
+        is_paracetamol,
         refuse_interaction_query,
+        same_product,
     )
 
     def _has(med: dict, names: tuple[str, ...]) -> bool:
@@ -415,26 +447,36 @@ def medication_safety(current_meds: list[dict], paracetamol_products: list[dict]
 
     out: dict = {"interactions": refuse_interaction_query()}
 
-    source = "provided"
-    if paracetamol_products is None:
-        source = "current_medications"
-        # a paracetamol entry without a dose in mg is still counted — as "dose unknown",
-        # never silently skipped
-        paracetamol_products = [
-            {"name": m["medication_name"], "mg_per_dose": _dose_mg(m),
-             "doses_per_day": m.get("times_per_day")}
-            for m in current_meds if _has(m, _PARACETAMOL_NAMES)
-        ]
-    if paracetamol_products:
-        load = check_paracetamol_load(paracetamol_products)
+    provided = list(paracetamol_products or [])
+    # a paracetamol entry without a dose in mg is still counted — as "dose unknown", never
+    # silently skipped
+    recorded = [
+        {"name": m["medication_name"], "mg_per_dose": _dose_mg(m),
+         "doses_per_day": m.get("times_per_day")}
+        for m in current_meds
+        if is_paracetamol(m.get("medication_name"), m.get("atc_code"))
+        and not any(same_product(m.get("medication_name"), p.get("name")) for p in provided)
+    ]
+    products = provided + recorded
+    if products:
+        source = "+".join(s for s, part in (("provided", provided),
+                                            ("current_medications", recorded)) if part)
+        load = check_paracetamol_load(products)
         out["paracetamol"] = {"source": source, "total_mg_per_day": round(load.total_mg_per_day),
                               "level": load.level, "message": load.message}
         if load.missing_dose:
             out["paracetamol"]["missing_dose"] = load.missing_dose
-        if source == "current_medications":
+        if recorded:
+            out["paracetamol"]["from_current_medications"] = [p["name"] for p in recorded]
+        if not provided:
             out["paracetamol"]["note"] = ("Combination products (cold/flu remedies) may contain "
                                           "paracetamol under another name — ask the user and pass "
                                           "them in paracetamol_products.")
+        elif recorded:
+            out["paracetamol"]["note"] = ("Recorded paracetamol medications are counted too. If "
+                                          "one of them is a product you passed under another "
+                                          "name, pass it under its recorded name instead so it "
+                                          "isn't counted twice.")
 
     if taking_biotin is None:
         taking_biotin = any(_has(m, _BIOTIN_NAMES) for m in current_meds)
@@ -450,7 +492,7 @@ def check_medication_safety(paracetamol_products: list[dict] | None = None,
     with engine.connect() as conn:
         uid = _user_id(conn)
         meds = [dict(r) for r in conn.execute(
-            text("""SELECT medication_name, dose_amount, dose_unit, times_per_day
+            text("""SELECT medication_name, dose_amount, dose_unit, times_per_day, atc_code
                     FROM v_medications_current WHERE user_id=:u"""), {"u": uid},
         ).mappings()] if uid else []
     return json.dumps(medication_safety(meds, paracetamol_products, taking_biotin, planned_tests),
@@ -465,8 +507,11 @@ def crisis_resources(message: str = "") -> str:
     contact = None
     try:
         with rw_engine.connect() as conn:  # user_profile is not exposed to the readonly role
+            uid = _user_id(conn)
+            # the current user's contact, never whichever profile row comes first
             contact = conn.execute(
-                text("SELECT emergency_contact FROM user_profile LIMIT 1")).scalar()
+                text("SELECT emergency_contact FROM user_profile WHERE user_id=:u"),
+                {"u": uid}).scalar() if uid else None
     except Exception:  # noqa: BLE001 — the crisis response must never depend on the database
         contact = None
     return json.dumps({
@@ -582,9 +627,10 @@ def search(query: str, limit: int = 8, days: int = 0) -> str:
                 f"""SELECT c.id, d.title, d.doc_type, c.chunk_type, c.effective_date, c.content,
                            1 - (c.embedding <=> CAST(:qv AS vector)) AS vscore
                     FROM document_chunks c JOIN documents d ON d.id = c.document_id
-                    WHERE d.deleted_at IS NULL AND c.embedding IS NOT NULL {dfv}
+                    WHERE d.user_id = :u AND d.deleted_at IS NULL AND c.embedding IS NOT NULL
+                      {dfv}
                     ORDER BY c.embedding <=> CAST(:qv AS vector) LIMIT :lim"""),
-                {"qv": qv, "lim": limit * 2, "d": days},
+                {"qv": qv, "lim": limit * 2, "d": days, "u": uid},
             ).mappings():
                 _put(r, "v", r["vscore"])
         if orq is not None:
@@ -592,9 +638,10 @@ def search(query: str, limit: int = 8, days: int = 0) -> str:
                 f"""SELECT c.id, d.title, d.doc_type, c.chunk_type, c.effective_date, c.content,
                            ts_rank(c.content_tsv, to_tsquery('simple', :orq)) AS kscore
                     FROM document_chunks c JOIN documents d ON d.id = c.document_id
-                    WHERE d.deleted_at IS NULL AND c.content_tsv @@ to_tsquery('simple', :orq) {dfv}
+                    WHERE d.user_id = :u AND d.deleted_at IS NULL
+                      AND c.content_tsv @@ to_tsquery('simple', :orq) {dfv}
                     ORDER BY kscore DESC LIMIT :lim"""),
-                {"orq": orq, "lim": limit * 2, "d": days},
+                {"orq": orq, "lim": limit * 2, "d": days, "u": uid},
             ).mappings():
                 _put(r, "k", r["kscore"])
 

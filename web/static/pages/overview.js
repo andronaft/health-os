@@ -6,7 +6,7 @@ import { dataTable, el, formatDate, formatRange, formatValue, statusPill } from 
 import { LANG, t } from "../strings.js";
 import {
   allergyText, chartLabel, coverageLines, diagnosisText, eventDetails, habitText, kindWord,
-  lastPanelText, markerHref, medicationText, pendingName, pendingNote, profileLine, profileProblems, readoutAt, sparklineOption,
+  lastPanelText, markerHref, medicationText, outNote, pendingName, pendingNote, profileLine, profileProblems, readoutAt, sparklineOption,
   staleText, tileAsOf, tileEmptyLines, tileHeadline, tileNote,
 } from "./overview-model.js";
 
@@ -125,6 +125,7 @@ function outOfRangePart(rows, { in_range: inRange }) {
       { key: "status", label: t("overview.col.status"), render: (row) => statusPill(row.status) },
       { key: "range", label: t("overview.col.range"), value: formatRange, sortable: false },
       { key: "at", label: t("overview.col.date"), render: (row) => formatDate(row.at) },
+      { key: "note", label: t("overview.col.note"), wrap: true, sortable: false, value: outNote },
     ],
   });
   return [heading, table.element];

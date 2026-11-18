@@ -10,9 +10,9 @@ pytestmark = pytest.mark.integration  # hits the DB via `engine` / MCP tools dir
 
 _XML = """<?xml version="1.0"?>
 <HealthData>
-  <Record type="HKQuantityTypeIdentifierStepCount" startDate="2024-01-15 08:00:00 +0200" value="1200"/>
-  <Record type="HKQuantityTypeIdentifierHeartRate" startDate="2024-01-15 08:00:00 +0200" value="60"/>
-  <Record type="HKQuantityTypeIdentifierHeartRate" startDate="2024-01-15 08:05:00 +0200" value="80"/>
+  <Record type="HKQuantityTypeIdentifierStepCount" unit="count" startDate="2024-01-15 08:00:00 +0200" value="1200"/>
+  <Record type="HKQuantityTypeIdentifierHeartRate" unit="count/min" startDate="2024-01-15 08:00:00 +0200" value="60"/>
+  <Record type="HKQuantityTypeIdentifierHeartRate" unit="count/min" startDate="2024-01-15 08:05:00 +0200" value="80"/>
   <Record type="HKCategoryTypeIdentifierIrregularHeartRhythmEvent" startDate="2024-01-15 09:00:00 +0200" value="x"/>
 </HealthData>"""
 
@@ -65,3 +65,29 @@ def test_reimport_is_idempotent():
         assert out2["samples_inserted"] == 0            # ON CONFLICT DO NOTHING
     finally:
         _cleanup(uid, sid)
+
+
+_XML_US = """<?xml version="1.0"?><HealthData>
+  <Record type="HKQuantityTypeIdentifierBodyMass" unit="lb" startDate="2026-11-10 08:00:00 +0100" value="180"/>
+  <Record type="HKQuantityTypeIdentifierBodyTemperature" unit="degF" startDate="2026-11-10 08:00:00 +0100" value="103.1"/>
+  <Record type="HKQuantityTypeIdentifierBodyMass" unit="oz" startDate="2026-11-11 08:00:00 +0100" value="2880"/>
+</HealthData>"""
+
+
+def test_record_units_are_converted_and_unknown_ones_reported(conn, user_id):
+    """A US iPhone exports lb and degF: 180 lb was stored as 180 kg, 103.1 °F as 103.1 °C."""
+    out = import_apple_health(conn, user_id, _XML_US)
+    rows = dict(conn.execute(text(
+        "SELECT type_code, value_canonical::float FROM v_observations WHERE user_id=:u"),
+        {"u": user_id}).all())
+    assert rows["body_weight"] == pytest.approx(81.647, abs=1e-3)
+    assert rows["body_temp"] == pytest.approx(39.5, abs=1e-3)
+    samples = dict(conn.execute(text(
+        "SELECT type_code, value::float FROM device_samples WHERE source_id=:s"),
+        {"s": out["source_id"]}).all())
+    assert samples == {"body_weight": pytest.approx(81.647, abs=1e-3),
+                       "body_temp": pytest.approx(39.5, abs=1e-3)}
+    # the ounce record is neither stored nor silently lost
+    assert out["skipped_unknown_unit"] == [{"type_code": "body_weight", "unit": "oz", "records": 1}]
+    assert "1 record(s) skipped" in out["note"]
+    assert out["daily_observations"] == 2

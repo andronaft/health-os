@@ -52,12 +52,24 @@ async function render(route) {
     view.append(emptyState({ message: t("empty.not_built") }));
     return;
   }
+  // a page that takes more than a moment shows where its content will be; a fast one never
+  // flashes it. The page's own replaceChildren drops it.
+  view.setAttribute("aria-busy", "true");
+  const skeleton = setTimeout(() => {
+    if (!view.childElementCount) {
+      view.append(el("div", { class: "skeleton", "aria-hidden": "true" }, el("div"), el("div"), el("div")));
+    }
+  }, 200);
   try {
     const page = await route.page.load();
     await page.render(view, route.args);
   } catch (err) {
     console.error(err);
     view.replaceChildren(errorState({ message: explain(err), onRetry: () => render(route) }));
+  } finally {
+    clearTimeout(skeleton);
+    view.removeAttribute("aria-busy");
+    view.querySelector(":scope > .skeleton")?.remove();
   }
 }
 
