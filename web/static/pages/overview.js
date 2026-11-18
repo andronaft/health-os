@@ -27,7 +27,7 @@ function criticalRow(row) {
       !row.unverifiable && statusPill("critical"),
       row.pending && statusPill("pending")),
     row.message && el("p", {}, row.message),
-    row.unverifiable && el("p", {}, t("overview.critical.unverifiable")),
+    row.unverifiable && el("p", {}, t(row.limit ? "overview.critical.limit" : "overview.critical.unverifiable")),
     row.pending && !row.unverifiable && el("p", {}, t("overview.critical.pending")));
 }
 

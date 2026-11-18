@@ -220,3 +220,27 @@ def compute_status(
     if ref_min is not None and value < ref_min:
         return "low"
     return "normal"
+
+
+def compute_limit_status(comparator: str | None, value: float | None, ref_min: float | None,
+                         ref_max: float | None) -> str | None:
+    """Status of a value printed as a limit (">600", "<0.5"), only when the limit decides it:
+    ">600" with range 70–100 is high, "<0.5" with range 0–5 is in range. ">2" with range 0–5
+    may be in range or high: None, never a guess."""
+    if comparator is None:
+        return compute_status(value, ref_min, ref_max)
+    if value is None or (ref_min is None and ref_max is None):
+        return None
+    if comparator in (">", ">="):
+        if ref_max is not None and value >= ref_max:
+            return "high"
+        if ref_max is None and (ref_min is None or value >= ref_min):
+            return "normal"
+        return None
+    if ref_min is not None and ref_min <= 0:
+        ref_min = None  # "0–5": a concentration can't be below 0, so "<0.5" is in range
+    if ref_min is not None and value <= ref_min:
+        return "low"
+    if ref_min is None and (ref_max is None or value <= ref_max):
+        return "normal"
+    return None

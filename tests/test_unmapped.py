@@ -116,3 +116,18 @@ def test_approve_leaves_unmapped_rows_pending(conn, user_id):
     assert appr["approved_observations"] == 1
     assert appr["left_pending_unmapped"][0]["observation_id"] == unknown
     assert _row(conn, unknown)["review_status"] == "pending"
+
+
+def test_a_learned_name_with_accents_maps_the_next_panel(conn, user_id):
+    # the synonym was saved as typed, but find_type compares the accent-stripped form
+    from datetime import date
+
+    from core.services import map_pending_observation, stage_panel
+    name = "Glucosa en suero (método enzimático)"
+    first = stage_panel(conn, user_id, date(2026, 9, 15),
+                        [{"raw_name": name, "value": 99, "unit": "mg/dL"}])
+    res = map_pending_observation(conn, user_id, first["rows"][0]["observation_id"], "glucose")
+    assert res["learned_synonym"]["saved"] is True
+    again = stage_panel(conn, user_id, date(2026, 9, 21),
+                        [{"raw_name": name.upper(), "value": 101, "unit": "mg/dL"}])
+    assert again["rows"][0]["matched"] == "glucose"

@@ -78,9 +78,9 @@ export function lastPanelText({ last_panel: date, last_panel_pending: pending })
   return t(pending ? "overview.coverage.last_panel_pending" : "overview.coverage.last_panel", { date: formatDate(date) });
 }
 
-export function pendingNote({ critical, unverifiable, unmapped }) {
+export function pendingNote({ critical, unverifiable, unmapped, limit }) {
   if (critical) return t("overview.pending.flag_critical");
-  if (unverifiable) return t("overview.pending.flag_unverifiable");
+  if (unverifiable) return t(limit ? "overview.pending.flag_limit" : "overview.pending.flag_unverifiable");
   return unmapped ? t("overview.pending.flag_unmapped") : "";
 }
 

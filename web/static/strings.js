@@ -53,6 +53,7 @@ const EN = {
   "overview.critical.title": "Critical values",
   "overview.critical.pending": "Not reviewed yet. It may be a recognition error, but do not wait for the review.",
   "overview.critical.unverifiable": "Unit not recognized, so the critical check is impossible. Compare this value with the form now.",
+  "overview.critical.limit": "The form gives only a limit, and a critical value lies past it, so the critical check is impossible. Compare this value with the form now.",
 
   "overview.profile.title": "Profile",
   "overview.profile.age": "{age} yr",
@@ -110,6 +111,7 @@ const EN = {
   "overview.pending.queue": "Open the review queue",
   "overview.pending.flag_critical": "Critical: see the top of this page",
   "overview.pending.flag_unverifiable": "Unit not recognized: critical check impossible",
+  "overview.pending.flag_limit": "Only a limit on the form: critical check impossible",
   "overview.pending.flag_unmapped": "Marker not recognized: not checked for critical values until it is mapped",
   "overview.out.title": "Latest values out of range: {n}",
   "overview.out.none": "No latest value is out of its range, among the {n} markers that have a range to compare with.",

@@ -422,3 +422,9 @@ test("only a lab marker's name links to its Labs page", () => {
   assert.equal(markerHref({ code: "systolic_bp", category: "vital" }), null);
   assert.equal(markerHref({ code: "a b", category: "lab" }), "#/labs/a%20b");
 });
+
+test("a value given only as a limit says why the critical check is impossible", () => {
+  assert.equal(pendingNote({ unverifiable: true, limit: true }), "Only a limit on the form: critical check impossible");
+  assert.equal(pendingNote({ unverifiable: true, limit: false }), "Unit not recognized: critical check impossible");
+  assert.equal(pendingNote({ critical: true, limit: true }), "Critical: see the top of this page");
+});

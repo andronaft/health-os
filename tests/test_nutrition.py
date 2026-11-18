@@ -75,3 +75,37 @@ def test_limit_only_nutrients_never_deficient(conn, user_id):
     deficient = {d["nutrient"] for d in summarize(conn, user_id, days=7)["deficient"]}
     assert "calcium" in deficient
     assert not deficient & {"added_sugar", "sodium"}
+
+
+def test_a_nutrient_is_averaged_over_every_logged_day(conn, user_id):
+    # vitamin D in one meal of a seven-day week was reported as 15 a day (75% of the RDA)
+    from datetime import datetime, timedelta
+
+    from analytics.nutrition import summarize
+    from core.services import add_food_log
+    now = datetime.now()
+    for i in range(7):
+        nutrients = {"energy_kcal": 2000, **({"vitamin_d": 15} if i == 0 else {})}
+        add_food_log(conn, user_id, f"day {i}", eaten_at=now - timedelta(days=i, hours=1),
+                     nutrients=nutrients)
+    s = summarize(conn, user_id, days=10)
+    vitamin_d = next(n for n in s["nutrients"] if n["nutrient"] == "vitamin_d")
+    assert s["days_logged"] == 7
+    assert abs(vitamin_d["avg_per_day"] - 15 / 7) < 0.01
+    assert vitamin_d["flag"] == "deficient"
+
+
+def test_the_glycemic_index_is_averaged_per_meal(conn, user_id):
+    # a meal with more nutrient rows used to weigh more: GI 90 and GI 30 averaged to 45
+    from datetime import datetime, timedelta
+
+    from analytics.nutrition import summarize
+    from core.services import add_food_log
+    now = datetime.now()
+    add_food_log(conn, user_id, "white bread", eaten_at=now - timedelta(hours=3),
+                 glycemic_index=90, wellbeing="tired", nutrients={"energy_kcal": 300})
+    add_food_log(conn, user_id, "lentils", eaten_at=now - timedelta(hours=2),
+                 glycemic_index=30, wellbeing="tired",
+                 nutrients={"energy_kcal": 300, "protein": 18, "fiber": 8, "sugar": 2})
+    [row] = summarize(conn, user_id, days=1)["wellbeing_association"]
+    assert row["meals"] == 2 and float(row["avg_gi"]) == 60

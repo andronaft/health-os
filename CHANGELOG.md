@@ -25,6 +25,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   sparklines now span at least 5% of the values.
 - Browser UI: leaving a marker's Labs page before it finished loading could replace the next
   page's heading with that marker's name.
+- **Critical values printed as a limit were never checked.** A value like ">600" (a glucose
+  meter's HI) or "<10" (platelets) was stored as text, so it skipped both the critical check
+  and the "critical check impossible" flag, sent no alert, and the summary listed it as an
+  ordinary pending value. A limit is now a number with its comparator: it is critical when
+  everything past it is critical, and "only a limit on the form — critical check impossible"
+  when a critical value may lie past it (">5" potassium). Its status is set only when the
+  limit decides it. Limits stay out of trends and the personal baseline. Text results
+  ("negative") are unchanged. Values already stored as text are not re-read.
+- The weekly report said `"stable": true` while a critical or uncheckable value was waiting for
+  review. It now lists them in `alarming_pending` and is never stable with one. Its window
+  also counts a value from when it was approved, not when it was staged: a panel staged 12
+  days ago and approved today was in no weekly report.
+- One malformed row in `stage_panel` (no `raw_name`, or not an object) crashed the whole panel,
+  critical rows included, in the duplicate check that runs before the row loop.
+- `map_pending_observation` saved a learned synonym as typed, but lookups compare the name
+  without accents, so a name like "Glucosa (método enzimático)" never mapped again even though
+  the tool said it was saved. New ones are saved in the compared form; learned synonyms
+  already stored with accents still need re-saving.
+- Nutrition averages divided each nutrient by the days it appeared, not by the days logged: one
+  meal with vitamin D in a week read as 75% of the daily RDA instead of 11%, hiding a
+  deficiency. The food↔wellbeing glycemic index average also weighed meals by their number of
+  nutrient rows.
+- `query_observations` returned weekly min/avg/max buckets for any window over 90 days, which
+  is the default (365). A year of a lab marker came back without status, unit, range or text
+  results. It now returns every value, with comparator, text and the form's range. Only more
+  than 200 values are bucketed, and the buckets count out-of-range and critical values.
 - Crisis keyword detection missed everyday phrasing: Spanish had only the `suicid` stem
   ("quiero morir", "no quiero vivir más", "me quiero matar" went undetected), German and Polish
   had nothing, and Russian "не хочу жить" and English "I don't want to live" slipped through.

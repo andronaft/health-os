@@ -104,7 +104,8 @@ def _pending_row(p, names: dict) -> dict:
             "raw_name": p["raw_name"], "value": _number(p["value_numeric"]),
             "comparator": p["comparator"], "text": p["value_text"], "unit": p["unit"],
             "at": p["effective_at"], "critical": p["status"] == "critical",
-            "unverifiable": bool(p["unverifiable"]), "unmapped": bool(p["unmapped"])}
+            "unverifiable": bool(p["unverifiable"]), "unmapped": bool(p["unmapped"]),
+            "limit": bool(p["limit_only"])}
 
 
 def _critical(markers: list[dict], pending, names: dict, lang: str, conn) -> list[dict]:

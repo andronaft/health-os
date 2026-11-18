@@ -57,11 +57,18 @@ def no_values_note(conn, uid: str, type_code: str) -> dict:
 
 
 def observations(conn, uid: str, type_code: str, days: int = 365) -> dict:
-    """A marker's values for the MCP tool: newest first, ≤MAX_ROWS; windows over
-    AGG_THRESHOLD_DAYS come back as weekly min/avg/max buckets."""
+    """A marker's values for the MCP tool, newest first. Every value as recorded (status, unit,
+    range, text) while they fit in MAX_ROWS; only more than that come back as weekly
+    min/avg/max buckets. Bucketing by window length alone turned the default year of a lab
+    marker — a few values — into buckets without status, unit or text results."""
     code, days = norm_code(type_code), clamp_days(days)
     params = {"u": uid, "c": code, "d": days, "lim": MAX_ROWS}
-    if days > AGG_THRESHOLD_DAYS:
+    n = conn.execute(
+        text("""SELECT count(*) FROM v_observations WHERE user_id=:u AND type_code=:c
+                AND effective_at >= now() - make_interval(days => :d)"""),
+        params,
+    ).scalar()
+    if n > MAX_ROWS and days > AGG_THRESHOLD_DAYS:
         rows = conn.execute(
             text(
                 """
@@ -69,7 +76,12 @@ def observations(conn, uid: str, type_code: str, days: int = 365) -> dict:
                        count(*) AS n,
                        round(min(value_canonical)::numeric, 3) AS min,
                        round(avg(value_canonical)::numeric, 3) AS avg,
-                       round(max(value_canonical)::numeric, 3) AS max
+                       round(max(value_canonical)::numeric, 3) AS max,
+                       max(canonical_unit) AS unit,
+                       -- a bucket must not hide that a value in it was out of range
+                       count(*) FILTER (WHERE status IN ('low', 'high')) AS out_of_range,
+                       count(*) FILTER (WHERE status = 'critical') AS critical,
+                       count(*) FILTER (WHERE value_canonical IS NULL) AS not_numeric
                 FROM v_observations
                 WHERE user_id=:u AND type_code=:c
                   AND effective_at >= now() - make_interval(days => :d)
@@ -83,7 +95,8 @@ def observations(conn, uid: str, type_code: str, days: int = 365) -> dict:
         rows = conn.execute(
             text(
                 """
-                SELECT effective_at, value_numeric, unit, value_canonical, canonical_unit, status
+                SELECT effective_at, value_numeric, comparator, value_text, unit,
+                       value_canonical, canonical_unit, ref_min, ref_max, status
                 FROM v_observations
                 WHERE user_id=:u AND type_code=:c
                   AND effective_at >= now() - make_interval(days => :d)
@@ -93,6 +106,8 @@ def observations(conn, uid: str, type_code: str, days: int = 365) -> dict:
             params,
         ).mappings().all()
         out = {"type_code": code, "rows": [dict(r) for r in rows]}
+        if n > MAX_ROWS:
+            out["truncated"] = f"the latest {MAX_ROWS} of {n} values"
     if not rows:
         out.update(no_values_note(conn, uid, code))
     return out
@@ -131,6 +146,7 @@ def trend(conn, uid: str, type_code: str, days: int = 1825) -> dict:
             """SELECT value_canonical, effective_at FROM (
                  SELECT value_canonical, effective_at FROM v_observations
                  WHERE user_id=:u AND type_code=:c AND value_canonical IS NOT NULL
+                   AND comparator IS NULL  -- ">600" is a limit, not a value to trend
                    AND effective_at >= now() - make_interval(days => :d)
                  ORDER BY effective_at DESC LIMIT 500
                ) recent ORDER BY effective_at ASC"""

@@ -30,7 +30,9 @@ def test_printed_strings_no_longer_lose_the_panel(conn, user_id):
     assert all(r["stored"] for r in rows.values()), rows
     assert rows["Калій"]["critical"] and rows["Калій"]["canonical"] == 6.4 and alerts
     assert rows["Glucose"]["value"] == 5.4 and rows["Glucose"]["status"] == "normal"
-    assert rows["CRP"]["value_text"] == "<0.5" and "stored as text" in rows["CRP"]["note"]
+    # a limit is a number with its comparator, so the critical check can run on it
+    assert rows["CRP"]["comparator"] == "<" and rows["CRP"]["value"] == 0.5
+    assert "a limit" in rows["CRP"]["note"]
     assert rows["HIV"]["value_text"] == "negative"
 
 
@@ -64,3 +66,15 @@ def test_tomorrow_is_allowed_for_time_zones(conn, user_id):
     out = stage_panel(conn, user_id, date.today() + timedelta(days=1),
                       [{"raw_name": "LDL", "value": 3, "unit": "mmol/L"}], alerter=lambda *a: None)
     assert "error" not in out and out["rows"][0]["stored"]
+
+
+def test_a_row_without_a_name_does_not_lose_the_panel_or_its_critical_value(conn, user_id):
+    # the duplicate check ran before the per-row loop and read r["raw_name"] directly
+    from datetime import date
+
+    from core.services import stage_panel
+    for bad in ({"value": 1.0, "unit": "mmol/L"}, {"raw_name": None, "value": 1.0}, "not a row"):
+        out = stage_panel(conn, user_id, date(2026, 11, 10),
+                          [{"raw_name": "Potassium", "value": 6.9, "unit": "mmol/L"}, bad])
+        assert out["counts"]["critical"] == 1, bad
+        assert out["rows"][1]["stored"] is False, bad

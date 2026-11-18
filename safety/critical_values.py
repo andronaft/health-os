@@ -116,6 +116,47 @@ def evaluate(
     return None
 
 
+ABOVE = (">", ">=")
+BELOW = ("<", "<=")
+
+
+def evaluate_limit(
+    type_code: str,
+    comparator: str,
+    value: float | None,
+    unit: str | None,
+    thresholds: list[Threshold],
+    sex: str | None = None,
+    lang: str | None = None,
+) -> tuple[CriticalHit | None, bool]:
+    """A value printed as a limit (">600", "<10"): the true value lies somewhere past it.
+
+    Returns (hit, uncertain). A hit only when everything past the limit is critical (">600"
+    glucose, "<10" platelets). Otherwise uncertain=True if a critical zone can still be reached
+    (">5" potassium may be 7): the check is impossible and must say so, never pass silently.
+    value is the limit in the canonical unit, like evaluate()'s.
+    """
+    if value is None or unit is None or comparator not in ABOVE + BELOW:
+        return None, False
+    uncertain = False
+    for t in thresholds:
+        if t.type_code != type_code or t.unit != unit:
+            continue
+        if t.sex is not None and sex is not None and t.sex != sex:
+            continue
+        if comparator in ABOVE:
+            if t.critical_high is not None and value >= t.critical_high:
+                return evaluate(type_code, value, unit, [t], sex, lang), False
+            uncertain |= t.critical_high is not None or (
+                t.critical_low is not None and value <= t.critical_low)
+        else:
+            if t.critical_low is not None and value <= t.critical_low:
+                return evaluate(type_code, value, unit, [t], sex, lang), False
+            uncertain |= t.critical_low is not None or (
+                t.critical_high is not None and value >= t.critical_high)
+    return None, uncertain
+
+
 def load_thresholds(conn) -> list[Threshold]:
     """Loads thresholds from critical_thresholds (SQLAlchemy connection)."""
     from sqlalchemy import text

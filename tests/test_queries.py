@@ -55,3 +55,36 @@ def test_view_rows_only_known_views(conn, user_id):
     assert isinstance(q.view_rows(conn, user_id, "diagnoses"), list)
     with pytest.raises(KeyError):
         q.view_rows(conn, user_id, "observations; DROP TABLE users")
+
+
+def test_a_year_of_lab_values_comes_back_as_values_not_buckets(conn, user_id):
+    # the default window (365 days) used to bucket every marker by week: status, unit and text
+    # results were lost, and a critical potassium read as {n: 1, avg: 6.9}
+    from datetime import UTC, datetime, timedelta
+
+    from core import queries as q
+    from core.services import ingest_observation
+    at = datetime.now(UTC) - timedelta(days=30)
+    ingest_observation(conn, user_id, "Potassium", 5.6, "mmol/L", ref_min=3.5, ref_max=5.1,
+                       effective_at=at)
+    out = q.observations(conn, user_id, "potassium", 365)
+    [row] = out["rows"]
+    assert "aggregation" not in out
+    assert row["status"] == "high" and row["canonical_unit"] == "mmol/L"
+    assert float(row["ref_max"]) == 5.1
+
+
+def test_many_values_are_bucketed_and_the_buckets_keep_what_was_out_of_range(conn, user_id):
+    from datetime import UTC, datetime, timedelta
+
+    from core import queries as q
+    from core.services import ingest_observation
+    start = datetime.now(UTC) - timedelta(days=300)
+    for i in range(q.MAX_ROWS + 5):
+        value = 5.6 if i == 0 else 4.2
+        ingest_observation(conn, user_id, "Potassium", value, "mmol/L", ref_min=3.5,
+                           ref_max=5.1, effective_at=start + timedelta(days=i))
+    out = q.observations(conn, user_id, "potassium", 365)
+    assert out["aggregation"] == "weekly"
+    assert sum(b["out_of_range"] for b in out["buckets"]) == 1
+    assert {b["unit"] for b in out["buckets"]} == {"mmol/L"}
