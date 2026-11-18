@@ -83,7 +83,7 @@ def test_pending_not_in_approved_view():
         approved = json.loads(tools.query_observations("potassium", days=30))
         assert all(float(r["value_canonical"]) != 6.8 for r in approved["rows"])
         pending = json.loads(tools.list_pending_reviews())
-        assert any(str(r["id"]) == oid for r in pending)
+        assert any(str(r["id"]) == oid for r in pending["rows"])
     finally:
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM observations WHERE id=:i"), {"i": oid})
@@ -195,3 +195,34 @@ def test_timeline_names_panels_without_a_type():
             conn.execute(text("DELETE FROM panels WHERE id=:p"), {"p": out["panel_id"]})
             conn.execute(text("DELETE FROM ingestion_sources WHERE id=:s"),
                          {"s": out["source_id"]})
+
+
+
+def test_open_results_tool_and_visit_briefing():
+    """The tool and the doctor-visit briefing both name a high value never re-measured; a low one
+    re-measured in range since stays only in the briefing's plain list of recent abnormals."""
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    ids = []
+    with engine.begin() as conn:
+        uid = get_or_create_user(conn)
+        for code, value, unit, lo, hi, days in (
+                ("ldl", 4.4, "mmol/L", None, 3.0, 100),
+                ("ferritin", 12, "ng/mL", 30, 400, 200),
+                ("ferritin", 60, "ng/mL", 30, 400, 50)):
+            ids.append(ingest_observation(conn, uid, code, value, unit, ref_min=lo, ref_max=hi,
+                                          effective_at=now - timedelta(days=days)).observation_id)
+    try:
+        out = json.loads(tools.get_open_results())
+        mine = [r for r in out["open"] if r["type_code"] in ("ldl", "ferritin")]
+        assert [r["type_code"] for r in mine] == ["ldl"]
+        assert mine[0]["newer_result_awaiting_review"] is False
+        visit = json.loads(tools.prepare_doctor_visit())
+        assert "ldl" in {r["code"] for r in visit["still_out_of_range"]}
+        assert "ferritin" not in {r["code"] for r in visit["still_out_of_range"]}
+        assert "ferritin" in {r["code"] for r in visit["recent_abnormal"]}
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM observations WHERE id = ANY(:ids)"),
+                         {"ids": [str(i) for i in ids]})

@@ -84,6 +84,14 @@ export function pendingNote({ critical, unverifiable, unmapped, limit }) {
   return unmapped ? t("overview.pending.flag_unmapped") : "";
 }
 
+/** What an out-of-range row adds: how long it has been out of range, a newer value under review. */
+export function outNote({ streak, since, newer_pending: newer }) {
+  const parts = [];
+  if (streak > 1) parts.push(t("overview.out.streak", { n: streak, date: formatDate(since) }));
+  if (newer) parts.push(t("overview.out.newer_pending"));
+  return parts.join(". ");
+}
+
 /** A row's name; a marker the system doesn't recognize keeps its wording from the form, in quotes. */
 export const pendingName = (row) => (row.unmapped ? `“${row.raw_name}”` : row.name);
 

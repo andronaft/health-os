@@ -146,7 +146,11 @@ def for_user(conn, uid: str | None) -> dict:
     ).mappings().first()
     if not prof or not prof["date_of_birth"] or not prof["sex"]:
         return {"error": "profile not filled in (date of birth and sex required)"}
-    dob, sex = prof["date_of_birth"], prof["sex"]
+    # the rules compare with "male"/"female": a profile saved as "Male" before set_profile
+    # normalised it silently lost the male-only screenings
+    dob, sex = prof["date_of_birth"], prof["sex"].strip().lower()
+    if dob > date.today():
+        return {"error": f"date of birth {dob} is in the future — fix it with set_profile"}
     age = date.today().year - dob.year - ((date.today().month, date.today().day) < (dob.month, dob.day))
 
     def _last(codes: list[str]):

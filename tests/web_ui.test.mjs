@@ -12,6 +12,7 @@ import {
   markerHref, medicationText,
   pendingName, pendingNote, profileLine, profileProblems, readoutAt, sparklineOption, staleText,
   tileEmptyLines, tileHeadline, tileNote,
+  outNote,
 } from "../web/static/pages/overview-model.js";
 import {
   baselineText, cellText, detailOption, filterMarkers, historyText, isOutOfRange, pointText,
@@ -427,4 +428,11 @@ test("a value given only as a limit says why the critical check is impossible", 
   assert.equal(pendingNote({ unverifiable: true, limit: true }), "Only a limit on the form: critical check impossible");
   assert.equal(pendingNote({ unverifiable: true, limit: false }), "Unit not recognized: critical check impossible");
   assert.equal(pendingNote({ critical: true, limit: true }), "Critical: see the top of this page");
+});
+
+test("an out-of-range row says how long it has been out of range and if a newer value waits", () => {
+  assert.equal(outNote({ streak: 3, since: "2024-12-01", newer_pending: false }), `Out of range 3 times in a row, since ${formatDate("2024-12-01")}`);
+  assert.equal(outNote({ streak: 1, since: "2026-01-01", newer_pending: false }), "");
+  assert.equal(outNote({ streak: 1, since: "2026-01-01", newer_pending: true }), "A newer value is under review");
+  assert.equal(outNote({ streak: null, since: null, newer_pending: false }), ""); // a vital: no run
 });

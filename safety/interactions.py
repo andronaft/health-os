@@ -10,6 +10,8 @@ computed:
 """
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass, field
 
 REFUSAL = (
@@ -34,6 +36,53 @@ class ParacetamolLoad:
 
 def refuse_interaction_query() -> str:
     return REFUSAL
+
+
+# Names a recorded medication may carry when it is paracetamol: the INN in several languages and
+# brands that are paracetamol products (all of them contain it). A brand list is never complete,
+# so the check also looks at the ATC code, and the model is told to ask about cold/flu remedies.
+# Combination products (Frenadol, Efferalgan codeine…) contain other drugs too: their paracetamol
+# content must come from the dose given (mg of paracetamol per dose), never assumed from the name.
+PARACETAMOL_ALIASES = (
+    "paracetamol", "paracetamolo", "paracetamolum", "acetaminophen",
+    "acetaminofen",  # also "acetaminofén": names are matched without accents
+    "парацетамол", "ацетамінофен", "ацетаминофен",
+    "gelocatil", "panadol", "efferalgan", "dafalgan", "termalgin", "tylenol", "apiretal",
+    "frenadol", "calpol", "xumadol", "perfalgan",
+)
+# ATC: paracetamol; paracetamol combinations excl. / with psycholeptics
+PARACETAMOL_ATC = ("N02BE01", "N02BE51", "N02BE71")
+
+
+def fold(s: str | None) -> str:
+    """Lower-case with accents stripped (NFKD): "Acetaminofén" → "acetaminofen". Cyrillic й/ї
+    lose their marks too, which is harmless for matching because the aliases are folded alike."""
+    decomposed = unicodedata.normalize("NFKD", s or "")
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).lower()
+
+
+# Anywhere in the name, as before: a whole-word match missed inflected and joined-up names
+# ("Парацетамолу таблетки", "Paracetamolratiopharm") and so skipped the daily total. Counting a
+# product that isn't paracetamol only adds to the total; missing one is false reassurance.
+_PARACETAMOL_RE = re.compile("|".join(re.escape(fold(a)) for a in PARACETAMOL_ALIASES))
+
+
+def is_paracetamol(name: str | None, atc_code: str | None = None) -> bool:
+    """A medication is counted as paracetamol by its ATC code or by a known name/brand.
+
+    A substring match on a few INN spellings missed every brand (Gelocatil 1 g × 4 = 4 g/day
+    gave no paracetamol check at all) and accented spellings (Acetaminofén)."""
+    if atc_code and atc_code.strip().upper() in PARACETAMOL_ATC:
+        return True
+    return bool(_PARACETAMOL_RE.search(fold(name)))
+
+
+def same_product(a: str | None, b: str | None) -> bool:
+    """Two names of one product: equal after folding and dropping spaces and punctuation
+    ("Gelocatil 1 g" == "gelocatil 1g")."""
+    def key(s):
+        return "".join(c for c in fold(s) if c.isalnum())
+    return bool(key(a)) and key(a) == key(b)
 
 
 def check_paracetamol_load(products: list[dict]) -> ParacetamolLoad:
@@ -93,11 +142,19 @@ def _positive(v) -> float | None:
 _BIOTIN_AFFECTED = {"tsh", "ft4", "ft3", "troponin", "vitamin_d", "vitamin_b12", "ferritin"}
 
 
+def _test_code(name: str) -> str:
+    """"TSH", " Vitamin D", "vitamin-b12" → the catalog codes the set above uses."""
+    return re.sub(r"[\s\-]+", "_", fold(str(name)).strip())
+
+
 def biotin_interference_warning(taking_biotin: bool, planned_test_codes: list[str]) -> str | None:
-    """Biotin before TSH/troponin/other immunoassays distorts the result."""
+    """Biotin before TSH/troponin/other immunoassays distorts the result.
+
+    Test names are matched case-insensitively: ["TSH"] used to give no warning at all."""
     if not taking_biotin:
         return None
-    hits = [c for c in planned_test_codes if c in _BIOTIN_AFFECTED]
+    hits = [c for c in dict.fromkeys(_test_code(t) for t in planned_test_codes)
+            if c in _BIOTIN_AFFECTED]
     if not hits:
         return None
     return (f"You're taking biotin — it distorts immunoassays ({', '.join(hits)}). "

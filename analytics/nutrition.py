@@ -18,11 +18,16 @@ def is_limit_only(rda: float | None, ul: float | None) -> bool:
 
 
 def summarize(conn, user_id: str, days: int = 30) -> dict:
+    # Every window has an upper bound: a meal dated far ahead (a typo in the year) used to count
+    # in every window from now until that date. The bound allows a day ahead, like log_meal:
+    # times are stored as naive local times in a UTC session, so a meal logged "now" can sit
+    # an hour or two after the database's now() — `<= now()` would hide it until then.
     # one denominator for every nutrient: the days with any meal logged. Counting only the days
     # a nutrient appeared turned one meal with vitamin D in a week into a "daily" 75% of the RDA
     days_logged = conn.execute(
         text("""SELECT count(DISTINCT date_trunc('day', eaten_at)) FROM v_food_log
-                WHERE user_id=:u AND eaten_at >= now() - make_interval(days => :d)"""),
+                WHERE user_id=:u AND eaten_at >= now() - make_interval(days => :d)
+                  AND eaten_at <= now() + interval '1 day'"""),
         {"u": user_id, "d": days},
     ).scalar() or 0
     rows = conn.execute(
@@ -32,6 +37,7 @@ def summarize(conn, user_id: str, days: int = 30) -> dict:
                       max(rda) AS rda, max(upper_limit) AS upper_limit
                FROM v_food_nutrients
                WHERE user_id=:u AND eaten_at >= now() - make_interval(days => :d)
+                 AND eaten_at <= now() + interval '1 day'
                GROUP BY nutrient_code, name_uk, category, unit"""
         ),
         {"u": user_id, "d": days},
@@ -77,6 +83,7 @@ def summarize(conn, user_id: str, days: int = 30) -> dict:
                    FROM v_food_nutrients fn WHERE fn.food_log_id = f.id) n ON true
                WHERE f.user_id=:u AND f.wellbeing IS NOT NULL
                  AND f.eaten_at >= now() - make_interval(days => :d)
+                 AND f.eaten_at <= now() + interval '1 day'
                GROUP BY f.wellbeing ORDER BY meals DESC"""
         ),
         {"u": user_id, "d": days},

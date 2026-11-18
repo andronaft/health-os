@@ -138,6 +138,10 @@ def test_the_demo_markers_add_up(demo, get):
     assert rows["ldl"]["ref_max"] == 3.0
     assert rows["ldl"]["name"] == "LDL cholesterol"  # the English name, not name_uk
     assert rows["ldl"]["category"] == "lab"  # the page links it to its Labs page
+    # out of range since when, and whether a newer value waits (q.open_results)
+    assert rows["ldl"]["streak"] >= 1 and rows["ldl"]["since"] is not None
+    assert rows["ldl"]["newer_pending"] is False
+    assert rows["vitamin_d"]["newer_pending"] is True  # the demo's newer vitamin D is pending
 
 
 # ---- pending values never look like facts --------------------------------------------------------
@@ -399,3 +403,18 @@ def test_an_unreachable_database_is_a_503_that_says_so(monkeypatch):
 def test_nothing_in_the_answer_reassures(demo, get):
     assert not re.search(r"everything is normal|all normal|all good|no problems",
                          str(get()).lower())
+
+
+def test_an_approved_limit_value_stays_in_the_critical_section(conn, user_id, get):
+    """Approving ">5" potassium is no critical check: it stays at the top of the page."""
+    from datetime import date
+
+    from core.services import approve_staged, stage_panel
+
+    staged = stage_panel(conn, user_id, date(2026, 11, 1),
+                         [{"raw_name": "Potassium", "value": ">5", "unit": "mmol/L",
+                           "ref_min": 3.5, "ref_max": 5.1}], alerter=lambda *a: None)
+    approve_staged(conn, user_id, staged["source_id"])
+    rows = get()["attention"]["critical"]
+    assert [(r["code"], r["comparator"], r["pending"], r["unverifiable"], r["limit"])
+            for r in rows] == [("potassium", ">", False, True, True)]

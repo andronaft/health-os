@@ -8,6 +8,7 @@ SEPARATE explicit action (guardrail: the model must not create+approve in one mo
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import date, datetime
 
 from core.db import engine
@@ -19,6 +20,7 @@ from core.services import (
     add_medication,
     approve_staged,
     get_or_create_user,
+    normalize_sex,
     stage_panel,
     upsert_profile,
 )
@@ -37,13 +39,50 @@ def _j(obj) -> str:
     return json.dumps(obj, default=str, ensure_ascii=False)
 
 
+# Arguments are checked here, before a transaction opens: a malformed date or id used to reach
+# Postgres and come back as a raw DataError/ValueError with the SQL in it.
+def _bad_date(field: str, value: str) -> str | None:
+    """None for a valid YYYY-MM-DD, else a message the agent can act on."""
+    try:
+        date.fromisoformat(str(value).strip())
+    except ValueError:
+        return f"{field} {value} is not a date (YYYY-MM-DD)"
+    return None
+
+
+def _eaten_at(value: str) -> tuple[datetime | None, str | None]:
+    if not value:
+        return datetime.now(), None
+    try:
+        return datetime.fromisoformat(str(value).strip()), None
+    except ValueError:
+        return None, f"eaten_at {value} is not a date-time — use 'YYYY-MM-DD HH:MM'"
+
+
+def _bad_uuid(field: str, value: str, where: str) -> str | None:
+    try:
+        uuid.UUID(str(value).strip())
+    except ValueError:
+        return f"{field} “{value}” is not an id — take it from {where}"
+    return None
+
+
 def set_profile(date_of_birth: str, sex: str, blood_type: str = "",
                 height_cm: float | None = None, emergency_contact: str = "") -> str:
     """Create/update the profile (date of birth YYYY-MM-DD, sex male/female).
     Needed for reference ranges, age-gate calculators, the screening calendar."""
+    err = _bad_date("date_of_birth", date_of_birth)
+    if err:
+        return _j({"error": err})
+    if date.fromisoformat(date_of_birth.strip()) > date.today():
+        return _j({"error": f"date_of_birth {date_of_birth} is in the future"})
+    try:
+        sex = normalize_sex(sex)
+    except ValueError as e:
+        return _j({"error": str(e)})
     with engine.begin() as conn:
         uid = get_or_create_user(conn)
-        upsert_profile(conn, uid, date_of_birth=date_of_birth, sex=sex,
+        upsert_profile(conn, uid, date_of_birth=date_of_birth.strip(), sex=sex,
                        blood_type=blood_type or None, height_cm=height_cm,
                        emergency_contact=emergency_contact or None)
     return _j({"ok": True})
@@ -52,11 +91,14 @@ def set_profile(date_of_birth: str, sex: str, blood_type: str = "",
 def record_allergy(allergen: str, reaction: str = "", severity: str = "",
                    verified: bool = False, allergen_type: str = "") -> str:
     """Add an allergy (auto-approved). verified=false is still treated as an allergy (fail-safe)."""
-    with engine.begin() as conn:
-        uid = get_or_create_user(conn)
-        aid = add_allergy(conn, uid, allergen, reaction=reaction or None,
-                          severity=severity or None, verified=verified,
-                          allergen_type=allergen_type or None)
+    try:
+        with engine.begin() as conn:
+            uid = get_or_create_user(conn)
+            aid = add_allergy(conn, uid, allergen, reaction=reaction or None,
+                              severity=severity or None, verified=verified,
+                              allergen_type=allergen_type or None)
+    except ValueError as e:  # blank allergen, over-long severity — nothing was written
+        return _j({"error": str(e)})
     return _j({"id": aid})
 
 
@@ -65,11 +107,15 @@ def record_diagnosis(diagnosis_name: str, diagnosed_at: str, icd10_code: str = "
                      verification_status: str = "confirmed", severity: str = "") -> str:
     """Add a diagnosis. verification_status: suspected/differential/provisional/confirmed/refuted.
     Advice is built only on confirmed."""
-    with engine.begin() as conn:
-        uid = get_or_create_user(conn)
-        did = add_diagnosis(conn, uid, diagnosis_name, diagnosed_at=diagnosed_at,
-                            icd10_code=icd10_code or None, clinical_status=clinical_status,
-                            verification_status=verification_status, severity=severity or None)
+    try:
+        with engine.begin() as conn:
+            uid = get_or_create_user(conn)
+            did = add_diagnosis(conn, uid, diagnosis_name, diagnosed_at=diagnosed_at,
+                                icd10_code=icd10_code or None, clinical_status=clinical_status,
+                                verification_status=verification_status,
+                                severity=severity or None)
+    except ValueError as e:  # empty name, unknown status, not a past date — nothing was written
+        return _j({"error": str(e)})
     return _j({"id": did})
 
 
@@ -78,9 +124,12 @@ def record_medication(medication_name: str, start_date: str, dose_amount: float 
                       product_type: str = "prescription", prescribed_for: str = "",
                       atc_code: str = "", route: str = "") -> str:
     """Add current medications/supplements. product_type: prescription/otc/supplement/herbal."""
+    err = _bad_date("start_date", start_date)
+    if err:
+        return _j({"error": err})
     with engine.begin() as conn:
         uid = get_or_create_user(conn)
-        mid = add_medication(conn, uid, medication_name, start_date=start_date,
+        mid = add_medication(conn, uid, medication_name, start_date=start_date.strip(),
                              dose_amount=dose_amount, dose_unit=dose_unit or None,
                              route=route or None, times_per_day=times_per_day,
                              product_type=product_type, prescribed_for=prescribed_for or None,
@@ -163,7 +212,9 @@ def log_meal(description: str, meal_type: str = "", eaten_at: str = "", portion:
     symptoms/wellbeing — reaction after eating (good/neutral/bloating/pain/nausea/heartburn).
     Review — query_food; daily norms — query_nutrition. Returns id + unknown_codes (nutrients
     outside the reference)."""
-    eat = datetime.fromisoformat(eaten_at) if eaten_at else datetime.now()
+    eat, err = _eaten_at(eaten_at)
+    if err:
+        return _j({"error": err})
     with engine.begin() as conn:
         uid = get_or_create_user(conn)
         out = add_food_log(conn, uid, description, eaten_at=eat, meal_type=meal_type or None,
@@ -203,11 +254,14 @@ def save_meal_template(name: str, meal_type: str = "", description: str = "",
                        nutrients: dict | None = None, glycemic_index: int | None = None) -> str:
     """Save a template for a frequent meal (by name). nutrients — {code: amount} per 1 portion.
     Then logged in one call via log_from_template(name)."""
-    with engine.begin() as conn:
-        uid = get_or_create_user(conn)
-        tid = _svc_save_meal_template(conn, uid, name, meal_type=meal_type or None,
-                                      description=description or None, nutrients=nutrients,
-                                      glycemic_index=glycemic_index)
+    try:
+        with engine.begin() as conn:
+            uid = get_or_create_user(conn)
+            tid = _svc_save_meal_template(conn, uid, name, meal_type=meal_type or None,
+                                          description=description or None, nutrients=nutrients,
+                                          glycemic_index=glycemic_index)
+    except ValueError as e:  # unknown nutrient code, impossible amount — nothing was written
+        return _j({"error": str(e)})
     return _j({"id": tid, "name": name})
 
 
@@ -215,7 +269,9 @@ def log_from_template(name: str, portion_factor: float = 1.0, eaten_at: str = ""
                       wellbeing: str = "", symptoms: str = "") -> str:
     """Log a meal from a saved template (nutrients × portion_factor).
     eaten_at=ISO (default — now). Quick entry of frequent meals in one call."""
-    eat = datetime.fromisoformat(eaten_at) if eaten_at else datetime.now()
+    eat, err = _eaten_at(eaten_at)
+    if err:
+        return _j({"error": err})
     with engine.begin() as conn:
         uid = get_or_create_user(conn)
         out = _svc_log_from_template(conn, uid, name, eaten_at=eat,
@@ -244,6 +300,9 @@ def map_pending_observation(observation_id: str, type_code: str,
     """Assign a marker type to a pending row (unmapped or matched to the wrong type), after the
     user confirmed which marker it is. Re-normalizes the value, re-checks critical values and
     saves the printed name as a learned synonym. The row stays pending until approve."""
+    err = _bad_uuid("observation_id", observation_id, "list_pending_reviews")
+    if err:
+        return _j({"error": err})
     with engine.begin() as conn:
         uid = get_or_create_user(conn)
         out = _svc_map_pending(conn, uid, observation_id, type_code,
@@ -254,6 +313,9 @@ def map_pending_observation(observation_id: str, type_code: str,
 def approve_staged_source(source_id: str, allow_missing_canonical: bool = False) -> str:
     """Approve a staged panel/source (a SEPARATE explicit action — only on a direct instruction
     from the user in the current message). Moves pending → approved."""
+    err = _bad_uuid("source_id", source_id, "the stage_lab_panel result or list_pending_reviews")
+    if err:
+        return _j({"error": err})
     with engine.begin() as conn:
         uid = get_or_create_user(conn)
         out = approve_staged(conn, uid, source_id,
