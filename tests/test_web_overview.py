@@ -137,6 +137,7 @@ def test_the_demo_markers_add_up(demo, get):
     assert rows["ldl"]["value"] == 3.8 and rows["ldl"]["unit"] == "mmol/L"
     assert rows["ldl"]["ref_max"] == 3.0
     assert rows["ldl"]["name"] == "LDL cholesterol"  # the English name, not name_uk
+    assert rows["ldl"]["category"] == "lab"  # the page links it to its Labs page
 
 
 # ---- pending values never look like facts --------------------------------------------------------
@@ -348,7 +349,17 @@ def test_events_are_past_ones_newest_first(conn, user_id, get):
     events = get()["events"]
     assert [e["title"] for e in events] == ["Sample A", "Sample B"]
     assert events[0] == {"kind": "medication_start", "date": str(today - timedelta(days=5)),
-                         "title": "Sample A", "pending": False}
+                         "title": "Sample A", "pending": False, "values": None,
+                         "out_of_range": None}
+
+
+def test_a_panel_event_counts_its_values_and_the_approved_ones_out_of_range(demo, get):
+    panels = [e for e in get()["events"] if e["kind"] == "panel"]
+    pending, latest = panels[0], panels[1]
+    # under review: its size, and none of its unreviewed values counted as out of range
+    assert pending["pending"] is True and pending["values"] == 2 and pending["out_of_range"] == 0
+    # two months ago: LDL and total cholesterol high, glucose, HDL, HbA1c, creatinine in range
+    assert latest["pending"] is False and latest["values"] == 6 and latest["out_of_range"] == 2
 
 
 # ---- a read-only API ------------------------------------------------------------------------------

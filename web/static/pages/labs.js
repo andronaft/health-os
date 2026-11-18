@@ -118,8 +118,12 @@ function matrixSection({ dates, older_dates: older, rows }) {
           ...dates.map((date) => matrixCell(row.cells[date]))))))));
 }
 
+const byName = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+
 async function renderIndex(view) {
   const data = await api(`labs?lang=${LANG}`);
+  // the table sorts by specimen and keeps this order inside each group: alphabetical
+  data.markers.sort((a, b) => byName.compare(a.name, b.name));
   if (!data.markers.length) {
     view.replaceChildren(pendingNotice(data.pending) ?? "", emptyState({ message: t("labs.none") }));
     return;
@@ -185,7 +189,9 @@ async function renderMarker(view, code) {
     }
     throw err;
   }
-  document.querySelector("#main h1").textContent = data.name;
+  if (!view.isConnected) return; // the user moved on while it loaded: that page has its own heading
+  const heading = view.parentElement.querySelector("h1");
+  if (heading) heading.textContent = data.name;
   document.title = `${data.name} · health-os`;
 
   const numeric = data.points.filter((p) => p.value !== null);

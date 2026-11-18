@@ -1,7 +1,7 @@
 // What the Labs page says and draws, from what /api/v1/labs and /api/v1/labs/<code> send. Nothing
 // here touches the page, so it can be tested without a browser (tests/web_ui.test.mjs).
 
-import { formatDate, formatRange, formatValue, statusWord } from "../components.js";
+import { chartRange, formatDate, formatRange, formatValue, statusWord } from "../components.js";
 import { t } from "../strings.js";
 
 const OUT = new Set(["low", "high", "critical"]);
@@ -39,15 +39,16 @@ export const historyText = ({ n, first_at: first, at }) =>
   (n > 1 ? t("labs.history", { n, date: formatDate(first) }) : t("labs.history_one", { date: formatDate(at) }));
 
 /**
- * The sparkline's points in a width × height box: x by date, y by value (up is higher). A
- * single value, or values that never change, sit on the middle line.
+ * The sparkline's points in a width × height box: x by date, y by value (up is higher). The
+ * height spans at least 5% of the values (chartRange): HDL 1.5 → 1.3 is a slope, not a cliff.
+ * A single value, or values that never change, sit on the middle line.
  */
 export function sparkPoints(points, width, height, pad = 3) {
   if (!points.length) return [];
   const times = points.map(({ at }) => Date.parse(at));
   const values = points.map(({ value }) => value);
   const [t0, t1] = [Math.min(...times), Math.max(...times)];
-  const [v0, v1] = [Math.min(...values), Math.max(...values)];
+  const [v0, v1] = chartRange(values);
   const x = (time) => (t1 === t0 ? width / 2 : pad + ((time - t0) / (t1 - t0)) * (width - 2 * pad));
   const y = (value) => (v1 === v0 ? height / 2 : pad + ((v1 - value) / (v1 - v0)) * (height - 2 * pad));
   return points.map((point, i) => [round(x(times[i])), round(y(values[i]))]);

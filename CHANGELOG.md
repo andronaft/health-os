@@ -20,6 +20,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   `observation_types.name_uk` need to use the new tables (#52).
 
 ### Fixed
+- Browser UI: the small charts stretched any change over their full height, so the demo's weight
+  going from 68.35 to 68.4 kg was drawn as a steep climb. The Overview tiles and the Labs
+  sparklines now span at least 5% of the values.
+- Browser UI: leaving a marker's Labs page before it finished loading could replace the next
+  page's heading with that marker's name.
 - Crisis keyword detection missed everyday phrasing: Spanish had only the `suicid` stem
   ("quiero morir", "no quiero vivir más", "me quiero matar" went undetected), German and Polish
   had nothing, and Russian "не хочу жить" and English "I don't want to live" slipped through.
@@ -91,6 +96,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   days with a lab value, coloured by status. Pending values count in no table, matrix, trend
   or baseline. New read-only `GET /api/v1/labs` and `GET /api/v1/labs/{code}`; `get_trend` now
   also returns `p` (#55).
+- Browser UI: on the Overview, a lab panel in Recent events says how many values it has and how
+  many approved ones are out of range ("6 values, 2 out of range") instead of a blank, and links
+  to the Labs page; a panel under review gives only its size. The names in "Latest values out
+  of range" link to their Labs pages. Menu items for pages not built yet say "soon".
 
 ## [0.3.0] — 2026-10-15
 
