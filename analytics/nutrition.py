@@ -18,11 +18,17 @@ def is_limit_only(rda: float | None, ul: float | None) -> bool:
 
 
 def summarize(conn, user_id: str, days: int = 30) -> dict:
+    # one denominator for every nutrient: the days with any meal logged. Counting only the days
+    # a nutrient appeared turned one meal with vitamin D in a week into a "daily" 75% of the RDA
+    days_logged = conn.execute(
+        text("""SELECT count(DISTINCT date_trunc('day', eaten_at)) FROM v_food_log
+                WHERE user_id=:u AND eaten_at >= now() - make_interval(days => :d)"""),
+        {"u": user_id, "d": days},
+    ).scalar() or 0
     rows = conn.execute(
         text(
             """SELECT nutrient_code, name_uk, category, unit,
                       sum(amount) AS total,
-                      count(DISTINCT date_trunc('day', eaten_at)) AS days_logged,
                       max(rda) AS rda, max(upper_limit) AS upper_limit
                FROM v_food_nutrients
                WHERE user_id=:u AND eaten_at >= now() - make_interval(days => :d)
@@ -33,8 +39,7 @@ def summarize(conn, user_id: str, days: int = 30) -> dict:
 
     nutrients, deficient, excess = [], [], []
     for r in rows:
-        dl = r["days_logged"] or 1
-        avg = float(r["total"]) / dl
+        avg = float(r["total"]) / (days_logged or 1)
         rda = float(r["rda"]) if r["rda"] is not None else None
         ul = float(r["upper_limit"]) if r["upper_limit"] is not None else None
         pct = round(avg / rda * 100) if rda else None
@@ -58,13 +63,18 @@ def summarize(conn, user_id: str, days: int = 30) -> dict:
     # food ↔ wellbeing link (association)
     assoc = conn.execute(
         text(
+            # one row per meal: joined to its nutrient rows, a meal with more of them weighed
+            # more in the GI average (GI 90 and GI 30 averaged to 45)
             """SELECT f.wellbeing,
-                      count(DISTINCT f.id) AS meals,
+                      count(*) AS meals,
                       round(avg(f.glycemic_index)::numeric, 0) AS avg_gi,
-                      round(avg(fn.amount) FILTER (WHERE fn.nutrient_code='sugar')::numeric, 1) AS avg_sugar,
-                      round(avg(fn.amount) FILTER (WHERE fn.nutrient_code='sodium')::numeric, 0) AS avg_sodium
+                      round(avg(n.sugar)::numeric, 1) AS avg_sugar,
+                      round(avg(n.sodium)::numeric, 0) AS avg_sodium
                FROM v_food_log f
-               LEFT JOIN v_food_nutrients fn ON fn.food_log_id = f.id
+               LEFT JOIN LATERAL (
+                   SELECT sum(fn.amount) FILTER (WHERE fn.nutrient_code='sugar') AS sugar,
+                          sum(fn.amount) FILTER (WHERE fn.nutrient_code='sodium') AS sodium
+                   FROM v_food_nutrients fn WHERE fn.food_log_id = f.id) n ON true
                WHERE f.user_id=:u AND f.wellbeing IS NOT NULL
                  AND f.eaten_at >= now() - make_interval(days => :d)
                GROUP BY f.wellbeing ORDER BY meals DESC"""
@@ -74,7 +84,7 @@ def summarize(conn, user_id: str, days: int = 30) -> dict:
 
     return {
         "period_days": days,
-        "days_logged": max((r["days_logged"] for r in rows), default=0),
+        "days_logged": days_logged,
         "deficient": deficient,
         "excess": excess,
         "wellbeing_association": [dict(a) for a in assoc],

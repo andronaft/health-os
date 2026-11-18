@@ -56,9 +56,13 @@ def read_facts(conn, user_id: str) -> dict:
         text(
             """SELECT ot.code, o.raw_name, o.value_numeric, o.comparator, o.value_text, o.unit,
                       o.effective_at, o.status, (o.type_id IS NULL) AS unmapped,
-                      (o.value_canonical IS NULL AND o.value_numeric IS NOT NULL
+                      -- a critical-watch value the check can't settle: its unit wasn't
+                      -- converted, or the form gives only a limit (">5" potassium may be 7)
+                      (o.status IS DISTINCT FROM 'critical' AND o.value_numeric IS NOT NULL
+                       AND (o.value_canonical IS NULL OR o.comparator IS NOT NULL)
                        AND EXISTS (SELECT 1 FROM critical_thresholds ct
-                                   WHERE ct.type_id = o.type_id)) AS unverifiable
+                                   WHERE ct.type_id = o.type_id)) AS unverifiable,
+                      (o.comparator IS NOT NULL) AS limit_only
                FROM observations o LEFT JOIN observation_types ot ON ot.id = o.type_id
                WHERE o.user_id=:u AND o.review_status='pending' AND o.deleted_at IS NULL
                ORDER BY o.effective_at DESC"""
@@ -157,11 +161,17 @@ def build(conn, user_id: str) -> SummaryResult:
     if pending:
         lines.append(f"## ⚠️ Awaiting review ({len(pending)} values, not yet facts)")
         for p in alarming:
-            what = ("**CRITICAL value** — contact a doctor today, even if it may be a "
-                    "recognition error" if p["status"] == "critical" else
-                    "**unit not recognized — critical check impossible**, compare with the form now")
-            lines.append(f"- {p['code']} {p['value_numeric']:g} {p['unit'] or ''} "
-                         f"({p['effective_at']:%Y-%m-%d}): {what}")
+            if p["status"] == "critical":
+                what = ("**CRITICAL value** — contact a doctor today, even if it may be a "
+                        "recognition error")
+            elif p["limit_only"]:
+                what = ("**only a limit on the form — critical check impossible**, compare "
+                        "with the form now")
+            else:
+                what = ("**unit not recognized — critical check impossible**, compare with the "
+                        "form now")
+            lines.append(f"- {p['code']} {p['comparator'] or ''}{p['value_numeric']:g} "
+                         f"{p['unit'] or ''} ({p['effective_at']:%Y-%m-%d}): {what}")
         if unmapped:
             # an unrecognized marker can't be checked against critical thresholds at all
             shown = ", ".join(

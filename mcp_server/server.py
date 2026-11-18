@@ -94,8 +94,10 @@ def get_health_summary() -> str:
 @mcp.tool(annotations=READ)
 @_db_guard
 def query_observations(type_code: str, days: int = 365) -> str:
-    """Values of a marker (e.g. 'cholesterol_total') over N days. >90 days → weekly
-    aggregation min/avg/max. Only confirmed (approved) values."""
+    """Values of a marker (e.g. 'cholesterol_total') over N days, newest first: each with its
+    status, unit, the form's range and any text result or limit (">600"). Only when there are
+    more than 200 values over more than 90 days, they come back as weekly min/avg/max buckets
+    that still count out-of-range and critical values. Only confirmed (approved) values."""
     return tools.query_observations(type_code, days)
 
 

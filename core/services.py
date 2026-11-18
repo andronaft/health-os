@@ -14,14 +14,22 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from core.normalize import (
+    canonicalize,
     canonicalize_unit,
-    compute_status,
+    compute_limit_status,
     convert_to_canonical,
     find_type,
     normalize,
     units_incompatible,
 )
-from safety.critical_values import CriticalHit, evaluate, load_thresholds
+from safety.critical_values import (
+    ABOVE,
+    BELOW,
+    CriticalHit,
+    evaluate,
+    evaluate_limit,
+    load_thresholds,
+)
 
 
 # --------------------------------------------------------------------------- users/profile
@@ -559,6 +567,7 @@ def ingest_observation(
     conn, user_id: str, raw_name: str, value: float | None, unit: str | None, *,
     effective_at: datetime | None = None, ref_min: float | None = None,
     ref_max: float | None = None, value_text: str | None = None,
+    comparator: str | None = None,
     channel: str = "manual", review_status: str = "approved",
     panel_id: str | None = None, source_id: str | None = None,
     time_precision: str = "datetime", alerter=None,
@@ -577,19 +586,28 @@ def ingest_observation(
     effective_at = effective_at or datetime.now()
     nr = normalize(raw_name, value, unit, conn)
 
-    # status — from the form's range (both in the same unit by construction)
-    status = compute_status(value, ref_min, ref_max)
+    if comparator is not None and comparator not in ABOVE + BELOW:
+        comparator = None
+    # status — from the form's range (both in the same unit by construction); a limit (">600")
+    # only when the limit decides it
+    status = compute_limit_status(comparator, value, ref_min, ref_max)
 
     # critical values — on the canonical value
     critical: CriticalHit | None = None
+    limit_unverified = False
     thresholds = load_thresholds(conn) if nr.type_code else []
     if nr.type_code and nr.value_canonical is not None and nr.canonical_unit is not None:
-        critical = evaluate(nr.type_code, nr.value_canonical, nr.canonical_unit, thresholds)
+        if comparator:
+            critical, limit_unverified = evaluate_limit(
+                nr.type_code, comparator, nr.value_canonical, nr.canonical_unit, thresholds)
+        else:
+            critical = evaluate(nr.type_code, nr.value_canonical, nr.canonical_unit, thresholds)
     # fail-safe: a critical-watch analyte whose unit we can't convert must not pass silently
     # (unless the unit says it isn't that analyte at all — then it's stored unmapped)
-    critical_unverified = (critical is None and value is not None and nr.conversion_missing
-                           and not nr.dimension_mismatch
-                           and any(t.type_code == nr.type_code for t in thresholds))
+    unit_unverified = (critical is None and value is not None and nr.conversion_missing
+                       and not nr.dimension_mismatch
+                       and any(t.type_code == nr.type_code for t in thresholds))
+    critical_unverified = unit_unverified or limit_unverified
     unmapped = nr.type_id is None or nr.dimension_mismatch
 
     needs_review = False
@@ -614,12 +632,21 @@ def ingest_observation(
         if alerter is not None:
             alerter("Health OS — critical value",
                     f"{nr.type_code} {critical.value}{critical.unit}: {critical.message}")
-    if critical_unverified:
+    if unit_unverified:
         notes.append(f"CRITICAL CHECK IMPOSSIBLE — unit “{unit}” not recognized for "
                      f"{nr.type_code}; compare the value with the form now")
         if alerter is not None:
             alerter("Health OS — verify a value",
                     f"{nr.type_code} {value} {unit}: unit not recognized, critical check impossible")
+    if limit_unverified:
+        needs_review, effective_status = True, "pending"
+        notes.append(f"CRITICAL CHECK IMPOSSIBLE — the form gives only a limit "
+                     f"({comparator}{value:g} {unit or ''}), and a critical value is past it; "
+                     f"compare with the form now")
+        if alerter is not None:
+            alerter("Health OS — verify a value",
+                    f"{nr.type_code} {comparator}{value:g} {unit or ''}: only a limit, "
+                    f"critical check impossible")
     if nr.synonym_origin == "learned":
         notes.append("mapped via a learned synonym — highlight for review")
 
@@ -633,15 +660,16 @@ def ingest_observation(
         text(
             """
             INSERT INTO observations (user_id, type_id, raw_name, effective_at, time_precision,
-                value_numeric, value_text, unit, value_canonical, ref_min, ref_max,
+                value_numeric, comparator, value_text, unit, value_canonical, ref_min, ref_max,
                 status, review_status, source_id, panel_id)
-            VALUES (:uid, :tid, :raw, :eff, :tp, :vn, :vt, :u, :vc, :rmin, :rmax, :st, :rs,
+            VALUES (:uid, :tid, :raw, :eff, :tp, :vn, :cmp, :vt, :u, :vc, :rmin, :rmax, :st, :rs,
                     :sid, :pid)
             RETURNING id
             """
         ),
         dict(uid=user_id, tid=None if unmapped else nr.type_id, raw=raw_name, eff=effective_at,
-             tp=time_precision, vn=value, vt=value_text, u=unit,
+             tp=time_precision, vn=value, cmp=comparator if value is not None else None,
+             vt=value_text, u=unit,
              vc=None if unmapped else nr.value_canonical, rmin=ref_min, rmax=ref_max,
              st=status, rs=effective_status, sid=sid, pid=panel_id),
     ).scalar()
@@ -681,14 +709,35 @@ def _lab_number(v) -> float | None:
     return None
 
 
+_LIMIT_SIGNS = {"<": "<", ">": ">", "<=": "<=", ">=": ">=", "≤": "<=", "≥": ">=",
+                "=<": "<=", "=>": ">="}
+
+
+def _lab_limit(v: str) -> tuple[str, float] | None:
+    """(comparator, number) from a printed limit: ">600", "< 10", "≤0,5", ">= 1.2"."""
+    import re
+    m = re.fullmatch(r"\s*(<=|>=|=<|=>|≤|≥|<|>)\s*(.+?)\s*", v)
+    if not m:
+        return None
+    num = _lab_number(m.group(2))
+    return (_LIMIT_SIGNS[m.group(1)], num) if num is not None else None
+
+
 def _coerce_lab_row(r: dict) -> tuple[dict, str | None]:
     """Models pass values as printed: "6,4", "negative", "<0.5". A numeric string becomes a
-    number; any other text goes to value_text (a qualitative result or a detection limit) —
-    a string compared with a float used to crash the whole panel, critical rows included."""
+    number; a limit (">600", "≤ 0,5") a number with its comparator; any other text goes to
+    value_text (a qualitative result) — a string compared with a float used to crash the whole
+    panel, critical rows included."""
     r = dict(r)
     note = None
     v = r.get("value")
-    if isinstance(v, str):
+    limit = _lab_limit(v) if isinstance(v, str) else None
+    if limit:
+        # ">600" (a meter's HI), "<10": a number with its comparator, so the critical check
+        # runs on it — as text it used to skip the check and the "impossible" flag alike
+        r["comparator"], r["value"] = limit
+        note = "a limit, not an exact value"
+    elif isinstance(v, str):
         num = _lab_number(v)
         if num is not None:
             r["value"] = num
@@ -770,7 +819,8 @@ def stage_panel(conn, user_id: str, panel_date, rows: list[dict], *,
                 res = ingest_observation(
                     conn, user_id, r["raw_name"], r.get("value"), r.get("unit"),
                     ref_min=r.get("ref_min"), ref_max=r.get("ref_max"),
-                    value_text=r.get("value_text"), effective_at=eff, time_precision=tp,
+                    value_text=r.get("value_text"), comparator=r.get("comparator"),
+                    effective_at=eff, time_precision=tp,
                     channel="mcp", review_status="pending", panel_id=panel_id,
                     source_id=source_id, alerter=alerter,
                 )
@@ -814,6 +864,7 @@ def stage_panel(conn, user_id: str, panel_date, rows: list[dict], *,
             **({"rejected_match": res.normalized.type_code}
                if res.normalized.dimension_mismatch else {}),
             "value": r.get("value"),
+            **({"comparator": r["comparator"]} if r.get("comparator") else {}),
             **({"value_text": r["value_text"]} if r.get("value_text") else {}),
             "unit": r.get("unit"),
             "canonical": res.normalized.value_canonical,
@@ -850,7 +901,11 @@ def _check_panel_duplicate(conn, user_id: str, panel_date, facility_id, rows: li
 
     codes = set()
     for r in rows:
-        t = find_type(r["raw_name"], conn)
+        # a malformed row is reported by the row loop; here it must not lose the whole panel
+        name = r.get("raw_name") if isinstance(r, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            continue
+        t = find_type(name, conn)
         if t:
             codes.add(t["code"])
     if not codes:
@@ -956,8 +1011,8 @@ def map_pending_observation(conn, user_id: str, observation_id: str, type_code: 
     """
     row = conn.execute(
         text(
-            """SELECT o.id, o.type_id, o.raw_name, o.value_numeric, o.unit, o.ref_min, o.ref_max,
-                      o.status, o.panel_id, o.source_id
+            """SELECT o.id, o.type_id, o.raw_name, o.value_numeric, o.comparator, o.unit,
+                      o.ref_min, o.ref_max, o.status, o.panel_id, o.source_id
                FROM observations o
                WHERE o.id = CAST(:id AS uuid) AND o.user_id = :u
                  AND o.review_status = 'pending' AND o.deleted_at IS NULL"""
@@ -985,15 +1040,22 @@ def map_pending_observation(conn, user_id: str, observation_id: str, type_code: 
         elif unit is not None:
             value_canonical = convert_to_canonical(t["id"], value, unit, t["canonical_unit"], conn)
 
-    status = compute_status(value, row["ref_min"], row["ref_max"])
+    comparator = row["comparator"]
+    status = compute_limit_status(comparator, value, row["ref_min"], row["ref_max"])
     thresholds = load_thresholds(conn)
     critical = None
+    limit_unverified = False
     if value_canonical is not None and t["canonical_unit"] is not None:
-        critical = evaluate(type_code, value_canonical, t["canonical_unit"], thresholds)
+        if comparator:
+            critical, limit_unverified = evaluate_limit(
+                type_code, comparator, value_canonical, t["canonical_unit"], thresholds)
+        else:
+            critical = evaluate(type_code, value_canonical, t["canonical_unit"], thresholds)
     if critical:
         status = "critical"
-    critical_unverified = (value is not None and value_canonical is None
-                           and any(th.type_code == type_code for th in thresholds))
+    critical_unverified = limit_unverified or (
+        value is not None and value_canonical is None
+        and any(th.type_code == type_code for th in thresholds))
 
     conn.execute(text("SELECT set_config('app.actor', 'user', true), "
                       "set_config('app.reason', 'map_pending', true)"))
@@ -1017,7 +1079,10 @@ def map_pending_observation(conn, user_id: str, observation_id: str, type_code: 
                                                           user_id)
                         VALUES (:tid, :syn, 'learned', :oid, :u)
                         ON CONFLICT DO NOTHING"""),
-                {"tid": t["id"], "syn": row["raw_name"].strip(), "oid": row["id"], "u": user_id},
+                # stored as find_type compares it: "Glucosa (método)" with its accents stripped
+                # was saved as typed and never matched again
+                {"tid": t["id"], "syn": canonicalize(row["raw_name"]), "oid": row["id"],
+                 "u": user_id},
             )
             learned = {"saved": True}
         else:

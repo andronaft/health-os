@@ -192,7 +192,7 @@ def lab_marker(conn, code: str, lang: str = "en") -> dict | None:
            FROM v_observations_pending WHERE user_id = :u AND type_code = :c
            ORDER BY effective_at"""), {"u": uid, "c": code}).mappings().all() if uid else []
 
-    values = [_number(p["value_canonical"]) for p in approved]
+    values = [_number(p["value_canonical"]) for p in approved if p["comparator"] is None]
     values = [v for v in values if v is not None]
     base = baseline(values) if len(values) >= BASELINE_MIN else None
     trend = q.trend(conn, uid, code, TREND_DAYS) if uid else None
