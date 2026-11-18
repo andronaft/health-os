@@ -93,6 +93,7 @@ def _tile(conn, uid, tile: str, codes: tuple, averaged: bool, latest: dict, name
 
 def _marker_row(m: dict, names: dict) -> dict:
     return {"code": m["type_code"], "name": names.get(m["type_code"], m["type_code"]),
+            "category": m["category"],
             "value": _number(m["value_numeric"]), "comparator": m["comparator"],
             "text": m["value_text"], "unit": m["unit"], "ref_min": _number(m["ref_min"]),
             "ref_max": _number(m["ref_max"]), "status": m["status"], "at": m["effective_at"]}

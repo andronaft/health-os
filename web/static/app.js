@@ -11,7 +11,10 @@ const navLinks = new Map();
 
 function buildNav() {
   const items = PAGES.map((page) => {
-    const link = el("a", { href: `#/${page.id}` }, t(page.title));
+    // a page still to come is in the menu, but says so before it is opened
+    const link = el("a", { href: `#/${page.id}`, "data-soon": !page.load },
+      t(page.title),
+      !page.load && el("span", { class: "nav-soon" }, ` · ${t("nav.soon")}`));
     navLinks.set(page.id, link);
     return el("li", {}, link);
   });

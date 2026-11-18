@@ -13,6 +13,7 @@ const EN = {
   "nav.habits": "Habits",
   "nav.review": "Review queue",
   "nav.report": "Visit report",
+  "nav.soon": "soon",
 
   "theme.label": "Theme",
   "theme.auto": "Auto",
@@ -245,6 +246,8 @@ const EN = {
   "labs.baseline.note": "It describes your own history, not what is healthy: the range on the form is what the lab compares with.",
 
   "overview.events.title": "Recent events",
+  "overview.event.panel": "{n} values",
+  "overview.event.panel_out": "{n} values, {out} out of range",
   "overview.kind.diagnosis": "Diagnosis",
   "overview.kind.visit": "Doctor visit",
   "overview.kind.procedure": "Procedure",

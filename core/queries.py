@@ -192,15 +192,25 @@ def timeline(conn, uid: str, days: int = 3650, limit: int = MAX_ROWS) -> list[di
 
 def recent_events(conn, uid: str, limit: int) -> list[dict]:
     """The latest events up to now, for the overview. A lab panel with values still under review
-    is flagged: it must not read as a finished result. It takes a base table to tell, so this
-    one doesn't run on the read-only login."""
+    is flagged: it must not read as a finished result. A panel also says how many values it has
+    and how many approved ones are out of range. It takes a base table to tell, so this one
+    doesn't run on the read-only login."""
     rows = conn.execute(
         text(
             """SELECT t.kind, (t.at AT TIME ZONE 'UTC')::date AS date, t.title,
                       (t.kind = 'panel' AND EXISTS (
                           SELECT 1 FROM observations o
                           WHERE o.panel_id = t.id AND o.review_status = 'pending'
-                            AND o.deleted_at IS NULL)) AS pending
+                            AND o.deleted_at IS NULL)) AS pending,
+                      -- a panel's size and how many of its approved values are out of range
+                      CASE WHEN t.kind = 'panel' THEN (
+                          SELECT count(*) FROM observations o
+                          WHERE o.panel_id = t.id AND o.deleted_at IS NULL) END AS values,
+                      CASE WHEN t.kind = 'panel' THEN (
+                          SELECT count(*) FROM observations o
+                          WHERE o.panel_id = t.id AND o.deleted_at IS NULL
+                            AND o.review_status = 'approved'
+                            AND o.status IN ('low', 'high', 'critical')) END AS out_of_range
                FROM health_timeline t
                WHERE t.user_id=:u AND t.at <= now()
                ORDER BY t.at DESC LIMIT :lim"""

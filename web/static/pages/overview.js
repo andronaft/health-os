@@ -5,8 +5,8 @@ import { api } from "../api.js";
 import { dataTable, el, formatDate, formatRange, formatValue, statusPill } from "../components.js";
 import { LANG, t } from "../strings.js";
 import {
-  allergyText, chartLabel, coverageLines, diagnosisText, habitText, kindWord, lastPanelText,
-  medicationText, pendingName, pendingNote, profileLine, profileProblems, readoutAt, sparklineOption,
+  allergyText, chartLabel, coverageLines, diagnosisText, eventDetails, habitText, kindWord,
+  lastPanelText, markerHref, medicationText, pendingName, pendingNote, profileLine, profileProblems, readoutAt, sparklineOption,
   staleText, tileAsOf, tileEmptyLines, tileHeadline, tileNote,
 } from "./overview-model.js";
 
@@ -116,7 +116,11 @@ function outOfRangePart(rows, { in_range: inRange }) {
     sort: { key: "at", direction: "desc" },
     filterable: rows.length > FILTER_ABOVE,
     columns: [
-      { key: "name", label: t("overview.col.marker") },
+      {
+        key: "name",
+        label: t("overview.col.marker"),
+        render: (row) => (markerHref(row) ? el("a", { href: markerHref(row) }, row.name) : row.name),
+      },
       { key: "value", label: t("overview.col.value"), numeric: true, render: formatValue, text: formatValue },
       { key: "status", label: t("overview.col.status"), render: (row) => statusPill(row.status) },
       { key: "range", label: t("overview.col.range"), value: formatRange, sortable: false },
@@ -222,7 +226,12 @@ function eventsSection({ events }) {
         key: "title",
         label: t("overview.col.details"),
         wrap: true,
-        render: (row) => (row.pending ? el("span", {}, row.title ?? "", row.title ? " " : "", statusPill("pending")) : row.title),
+        value: eventDetails,
+        render: (row) => {
+          const details = eventDetails(row);
+          const text = row.kind === "panel" ? el("a", { href: "#/labs" }, details) : details;
+          return row.pending ? el("span", {}, text, details ? " " : "", statusPill("pending")) : text;
+        },
       },
     ],
   });

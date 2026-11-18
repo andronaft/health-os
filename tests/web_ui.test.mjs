@@ -4,11 +4,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  filterRows, formatDate, formatRange, formatValue, sortRows, statusKey, statusWord,
+  chartRange, filterRows, formatDate, formatRange, formatValue, sortRows, statusKey, statusWord,
 } from "../web/static/components.js";
 import { PAGES, parseRoute } from "../web/static/pages.js";
 import {
-  allergyText, coverageLines, diagnosisText, habitText, kindWord, lastPanelText, medicationText,
+  allergyText, coverageLines, diagnosisText, eventDetails, habitText, kindWord, lastPanelText,
+  markerHref, medicationText,
   pendingName, pendingNote, profileLine, profileProblems, readoutAt, sparklineOption, staleText,
   tileEmptyLines, tileHeadline, tileNote,
 } from "../web/static/pages/overview-model.js";
@@ -385,4 +386,39 @@ test("counts read as one or many", () => {
   assert.equal(tn("labs.pending_note", { n: 1 }).startsWith("1 lab value is"), true);
   assert.equal(tn("labs.pending_note", { n: 2 }).startsWith("2 lab values are"), true);
   assert.equal(tn("labs.detail.unconverted", { n: 1, unit: "g/L" }).startsWith("1 value could not"), true);
+});
+
+// ---- small charts don't exaggerate; events and links -----------------------------------------
+
+test("a small chart's axis spans at least 5% of the values, so a tiny change stays small", () => {
+  const [low, high] = chartRange([68.35, 68.4]);
+  assert.ok(high - low >= 68.375 * 0.05 - 1e-9);
+  assert.ok(low < 68.35 && high > 68.4);
+  assert.deepEqual(chartRange([1, 3, 2]), [1, 3]); // a real change keeps its own range
+  assert.deepEqual(chartRange([0, 0]), [0, 0]); // nothing to scale: flat, on the middle line
+  assert.equal(chartRange([]), null);
+  assert.deepEqual(chartRange([NaN, 5, 5]).map((n) => Math.round(n * 1000) / 1000), [4.875, 5.125]);
+  // the weight tile from the demo: 68.35 → 68.4 kg was drawn as a line across the whole height
+  const tile = { series: [{ name: "Weight", points: [{ at: "2026-11-11", value: 68.35 }, { at: "2026-11-18", value: 68.4 }] }] };
+  const { yAxis } = sparklineOption(tile, { from: "2026-10-19", to: "2026-11-18" });
+  assert.ok(yAxis.max - yAxis.min > 3);
+  // and the Labs table's sparkline: HDL 1.5 → 1.3 is a slope, not top to bottom
+  const ys = sparkPoints([{ at: "2025-01-01", value: 1.5 }, { at: "2026-01-01", value: 1.48 }], 100, 20, 0).map(([, y]) => y);
+  assert.ok(Math.abs(ys[0] - ys[1]) < 20);
+});
+
+test("a lab panel in the events says its size and what is out of range", () => {
+  assert.equal(eventDetails({ kind: "panel", title: null, values: 6, out_of_range: 2, pending: false }), "6 values, 2 out of range");
+  assert.equal(eventDetails({ kind: "panel", title: null, values: 6, out_of_range: 0, pending: false }), "6 values");
+  // under review: its size only; "out of range" of unreviewed values would read as a fact
+  assert.equal(eventDetails({ kind: "panel", title: null, values: 2, out_of_range: 1, pending: true }), "2 values");
+  assert.equal(eventDetails({ kind: "panel", title: "Lipid panel", values: 4, out_of_range: 1 }), "Lipid panel");
+  assert.equal(eventDetails({ kind: "diagnosis", title: "Hypercholesterolemia", values: null }), "Hypercholesterolemia");
+  assert.equal(eventDetails({ kind: "visit", title: null }), "");
+});
+
+test("only a lab marker's name links to its Labs page", () => {
+  assert.equal(markerHref({ code: "ldl", category: "lab" }), "#/labs/ldl");
+  assert.equal(markerHref({ code: "systolic_bp", category: "vital" }), null);
+  assert.equal(markerHref({ code: "a b", category: "lab" }), "#/labs/a%20b");
 });

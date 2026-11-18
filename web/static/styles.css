@@ -165,6 +165,11 @@ nav a:hover {
   color: var(--fg);
 }
 
+/* said in words, not by fading the link: faded text would fail contrast */
+.nav-soon {
+  font-size: 0.75rem;
+}
+
 /* the bar and the weight mark it, not only the colour */
 nav a[aria-current="page"] {
   border-inline-start-color: var(--accent);
@@ -256,6 +261,15 @@ footer strong {
     border-inline-start: 0;
     border-bottom: 3px solid transparent;
     white-space: nowrap;
+  }
+
+  /* no room for the words in the bar on a phone: the link is in italics, the page says the rest */
+  nav a[data-soon] {
+    font-style: italic;
+  }
+
+  .nav-soon {
+    display: none;
   }
 
   nav a[aria-current="page"] {
