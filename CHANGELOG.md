@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-11-20
+
 ### Added
 - Browser UI: the Review queue page (#58) lists every value awaiting review, grouped by the
   staging it came in (panel date, lab, document, when and how it was staged, and its id for
@@ -25,6 +27,56 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 - Browser UI: print styles (always the light palette, no navigation or controls, tables in
   full; charts are repainted light for the print), a loading placeholder for pages that take
   more than 200 ms, and no animation under `prefers-reduced-motion`.
+- Browser UI skeleton (preview): `make ui` / `python -m web` starts a read-only web server on
+  127.0.0.1 only (port `UI_PORT`, default 8765) and opens the page with a per-run session token
+  in the URL fragment. Requests with a foreign `Host` get 400 (DNS rebinding), `/api/*` without
+  the token 403, anything but GET 405; a strict Content-Security-Policy, no external resources.
+  The page shows only the connection status and version so far. New `ui` extra (Starlette,
+  uvicorn) (#50).
+- Browser UI frame (preview), still without data: a menu of the coming pages, a light, dark or
+  system theme from CSS tokens, and a "Not a medical device" footer. Reusable pieces for the data
+  pages: a sortable and filterable table (blanks sort last in both directions), a status pill
+  (low / in range / high / pending, always with a word and an icon; pending is hollow and
+  dashed), empty and error states. Apache ECharts 6.1.0 is vendored in `web/static/vendor/` with
+  its licences and loaded only by a page that draws a chart. Its tooltips are painted on the
+  canvas, because the default HTML ones break under the CSP. Checked in a browser in both themes
+  at 1280 and 375 px wide: no external requests, no CSP violations (#53).
+- `core/queries.py` — one read layer for the MCP tools and the coming browser UI: `observations`, `trend`, `timeline`, the per-user views, plus `markers` (latest value of every marker with its own range and counts) and `series` (chart points, each with its own reference range). The MCP tools now call it; their output is unchanged (#51).
+- `check_data_quality` — checks of the stored records, not of health: reference ranges that are
+  swapped, empty or far narrower than the same marker's other ranges (typical recognition
+  errors), lab values that jumped ≥5× from the previous value, approved numbers without a
+  canonical value, the review queue, and diagnoses still "active" after two years. Each item is
+  "verify against the original document".
+- `get_anomalies` — compares each marker's latest approved value with the user's own earlier
+  values (mean ± SD of up to 90 previous values) and lists those beyond a z threshold. Uses the
+  existing `analytics/baselines.py`, which no tool reached before. Markers with fewer than 5
+  earlier values and personal records (`pr_*`, which only ever improve) are skipped. README no
+  longer claims risk calculators beyond their age gate (#33).
+- Browser UI Overview page (preview), the home page: profile card that says what a missing date
+  of birth or sex breaks; critical values in red with their escalation text, approved or not;
+  values awaiting review, marked as not yet facts; latest values out of range, overdue screenings
+  and markers not checked in over 12 months; tiles with 30-day sparklines for blood pressure
+  (7-day average), resting heart rate, HRV, sleep score and weight; recent events, with a panel
+  still under review flagged. It says "N of M recorded markers in range" and what the rest are,
+  never a global verdict. New read-only `GET /api/v1/overview`. It reads the same rows as
+  `get_health_summary` (`core.health_summary.read_facts`) in one read-only snapshot (#54).
+- Browser UI Labs page (preview). The marker table lists every lab marker's latest approved
+  value with its status, the range on its form, a sparkline of the last 12 values, how many
+  values there are since when, and how many wait for review; filters for "out of range only"
+  and specimen, plus the text filter. Each marker has its own page: a chart in the marker's
+  canonical unit where every value sits over the range printed on its own form (ranges differ
+  between labs; a range in another unit is converted like the value, or left out if it can't
+  be), pending values drawn hollow, grey and labelled "unverified", the trend (Mann-Kendall
+  p, Theil–Sen slope per year, the same numbers as `get_trend`), an optional personal baseline
+  (mean ± 2σ, at least 5 approved values), text results on their own axis, and a table of every
+  value with the form's value, unit and range. A panel matrix shows markers × the latest 12
+  days with a lab value, coloured by status. Pending values count in no table, matrix, trend
+  or baseline. New read-only `GET /api/v1/labs` and `GET /api/v1/labs/{code}`; `get_trend` now
+  also returns `p` (#55).
+- Browser UI: on the Overview, a lab panel in Recent events says how many values it has and how
+  many approved ones are out of range ("6 values, 2 out of range") instead of a blank, and links
+  to the Labs page; a panel under review gives only its size. The names in "Latest values out
+  of range" link to their Labs pages. Menu items for pages not built yet say "soon".
 
 ### Changed
 - Critical-value messages in tool output and alerts are in English by default, with Ukrainian
@@ -193,59 +245,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   first. The other lists have a fixed order too (medications and habits by start date,
   diagnoses by date, allergies by name).
 
-### Added
-- Browser UI skeleton (preview): `make ui` / `python -m web` starts a read-only web server on
-  127.0.0.1 only (port `UI_PORT`, default 8765) and opens the page with a per-run session token
-  in the URL fragment. Requests with a foreign `Host` get 400 (DNS rebinding), `/api/*` without
-  the token 403, anything but GET 405; a strict Content-Security-Policy, no external resources.
-  The page shows only the connection status and version so far. New `ui` extra (Starlette,
-  uvicorn) (#50).
-- Browser UI frame (preview), still without data: a menu of the coming pages, a light, dark or
-  system theme from CSS tokens, and a "Not a medical device" footer. Reusable pieces for the data
-  pages: a sortable and filterable table (blanks sort last in both directions), a status pill
-  (low / in range / high / pending, always with a word and an icon; pending is hollow and
-  dashed), empty and error states. Apache ECharts 6.1.0 is vendored in `web/static/vendor/` with
-  its licences and loaded only by a page that draws a chart. Its tooltips are painted on the
-  canvas, because the default HTML ones break under the CSP. Checked in a browser in both themes
-  at 1280 and 375 px wide: no external requests, no CSP violations (#53).
-- `core/queries.py` — one read layer for the MCP tools and the coming browser UI: `observations`, `trend`, `timeline`, the per-user views, plus `markers` (latest value of every marker with its own range and counts) and `series` (chart points, each with its own reference range). The MCP tools now call it; their output is unchanged (#51).
-- `check_data_quality` — checks of the stored records, not of health: reference ranges that are
-  swapped, empty or far narrower than the same marker's other ranges (typical recognition
-  errors), lab values that jumped ≥5× from the previous value, approved numbers without a
-  canonical value, the review queue, and diagnoses still "active" after two years. Each item is
-  "verify against the original document".
-
-- `get_anomalies` — compares each marker's latest approved value with the user's own earlier
-  values (mean ± SD of up to 90 previous values) and lists those beyond a z threshold. Uses the
-  existing `analytics/baselines.py`, which no tool reached before. Markers with fewer than 5
-  earlier values and personal records (`pr_*`, which only ever improve) are skipped. README no
-  longer claims risk calculators beyond their age gate (#33).
-- Browser UI Overview page (preview), the home page: profile card that says what a missing date
-  of birth or sex breaks; critical values in red with their escalation text, approved or not;
-  values awaiting review, marked as not yet facts; latest values out of range, overdue screenings
-  and markers not checked in over 12 months; tiles with 30-day sparklines for blood pressure
-  (7-day average), resting heart rate, HRV, sleep score and weight; recent events, with a panel
-  still under review flagged. It says "N of M recorded markers in range" and what the rest are,
-  never a global verdict. New read-only `GET /api/v1/overview`. It reads the same rows as
-  `get_health_summary` (`core.health_summary.read_facts`) in one read-only snapshot (#54).
-- Browser UI Labs page (preview). The marker table lists every lab marker's latest approved
-  value with its status, the range on its form, a sparkline of the last 12 values, how many
-  values there are since when, and how many wait for review; filters for "out of range only"
-  and specimen, plus the text filter. Each marker has its own page: a chart in the marker's
-  canonical unit where every value sits over the range printed on its own form (ranges differ
-  between labs; a range in another unit is converted like the value, or left out if it can't
-  be), pending values drawn hollow, grey and labelled "unverified", the trend (Mann-Kendall
-  p, Theil–Sen slope per year, the same numbers as `get_trend`), an optional personal baseline
-  (mean ± 2σ, at least 5 approved values), text results on their own axis, and a table of every
-  value with the form's value, unit and range. A panel matrix shows markers × the latest 12
-  days with a lab value, coloured by status. Pending values count in no table, matrix, trend
-  or baseline. New read-only `GET /api/v1/labs` and `GET /api/v1/labs/{code}`; `get_trend` now
-  also returns `p` (#55).
-- Browser UI: on the Overview, a lab panel in Recent events says how many values it has and how
-  many approved ones are out of range ("6 values, 2 out of range") instead of a blank, and links
-  to the Labs page; a panel under review gives only its size. The names in "Latest values out
-  of range" link to their Labs pages. Menu items for pages not built yet say "soon".
-
 ## [0.3.0] — 2026-10-15
 
 ### Changed
@@ -413,7 +412,8 @@ First public release.
 - Postgres and Open WebUI ports bound to `127.0.0.1` by default.
 - Private vulnerability reporting — see [SECURITY.md](SECURITY.md).
 
-[Unreleased]: https://github.com/andronaft/health-os/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/andronaft/health-os/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/andronaft/health-os/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/andronaft/health-os/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/andronaft/health-os/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/andronaft/health-os/compare/v0.1.0...v0.2.0

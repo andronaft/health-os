@@ -105,7 +105,7 @@ matrix; values awaiting review are drawn hollow and count nowhere. The Review qu
 every value awaiting review, grouped by the staging it came in, with what can't wait and what
 wasn't recognized first and the staging id to give your MCP client; it approves nothing itself.
 The other pages are still empty — they come in
-0.4.0 ([milestone](https://github.com/andronaft/health-os/milestone/1)). Nothing is loaded from
+later releases ([milestone](https://github.com/andronaft/health-os/milestone/1)). Nothing is loaded from
 outside this machine: Apache ECharts is kept in `web/static/vendor/` with its licence.
 
 ## How it works
