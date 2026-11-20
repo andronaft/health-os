@@ -31,7 +31,7 @@ schedules are deterministic code, not LLM judgement.
   formulas aren't implemented yet.
 - **Food log** — meals with a 41-nutrient profile, %RDA, deficiency/excess flags, meal templates.
 - **Devices** — Apple Health export and Garmin import.
-- **38 MCP tools + server instructions** — the safety rules are sent to every client on connect;
+- **39 MCP tools + server instructions** — the safety rules are sent to every client on connect;
   see [mcp_server/README.md](mcp_server/README.md).
 
 ## Try it in one command
@@ -99,7 +99,10 @@ session token. The Overview page shows your profile, what needs attention (criti
 their escalation text, values awaiting review, latest values out of range, overdue screenings,
 markers not checked in a long time), 30-day tiles for blood pressure, resting heart rate, HRV,
 sleep score and weight, and recent events. It reads the same rows as `get_health_summary`, and
-only ever says "N of M recorded markers in range". The other pages are still empty — they come in
+only ever says "N of M recorded markers in range". The Labs page has a table of every lab marker,
+a chart per marker with the range of each form, its trend and your personal baseline, and a panel
+matrix; values awaiting review are drawn hollow and count nowhere. The other pages are still
+empty — they come in
 0.4.0 ([milestone](https://github.com/andronaft/health-os/milestone/1)). Nothing is loaded from
 outside this machine: Apache ECharts is kept in `web/static/vendor/` with its licence.
 

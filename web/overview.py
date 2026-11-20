@@ -93,9 +93,19 @@ def _tile(conn, uid, tile: str, codes: tuple, averaged: bool, latest: dict, name
 
 def _marker_row(m: dict, names: dict) -> dict:
     return {"code": m["type_code"], "name": names.get(m["type_code"], m["type_code"]),
+            "category": m["category"],
             "value": _number(m["value_numeric"]), "comparator": m["comparator"],
             "text": m["value_text"], "unit": m["unit"], "ref_min": _number(m["ref_min"]),
             "ref_max": _number(m["ref_max"]), "status": m["status"], "at": m["effective_at"]}
+
+
+def _out_row(m: dict, names: dict, still_open: dict | None) -> dict:
+    """An out-of-range marker, and for a lab one since when it has been out of range in a row and
+    whether a newer value of it waits for review (q.open_results)."""
+    return {**_marker_row(m, names),
+            "since": still_open["since"] if still_open else None,
+            "streak": still_open["streak"] if still_open else None,
+            "newer_pending": bool(still_open and still_open["newer_pending"])}
 
 
 def _pending_row(p, names: dict) -> dict:
@@ -103,19 +113,28 @@ def _pending_row(p, names: dict) -> dict:
             "raw_name": p["raw_name"], "value": _number(p["value_numeric"]),
             "comparator": p["comparator"], "text": p["value_text"], "unit": p["unit"],
             "at": p["effective_at"], "critical": p["status"] == "critical",
-            "unverifiable": bool(p["unverifiable"]), "unmapped": bool(p["unmapped"])}
+            "unverifiable": bool(p["unverifiable"]), "unmapped": bool(p["unmapped"]),
+            "limit": bool(p["limit_only"])}
 
 
-def _critical(markers: list[dict], pending, names: dict, lang: str, conn) -> list[dict]:
-    """Critical values first (approved or not), with the escalation text from safety/."""
+def _critical(markers: list[dict], pending, names: dict, lang: str, conn,
+              unverifiable: list[dict] = ()) -> list[dict]:
+    """Critical values first (approved or not), with the escalation text from safety/. An
+    approved value the critical check couldn't settle (a limit, an unconverted unit) is here
+    too: approving it was no check."""
     wanted = [m for m in markers if m["status"] == "critical"]
     alarming = [p for p in pending if is_alarming(p)]
-    if not wanted and not alarming:
+    if not wanted and not alarming and not unverifiable:
         return []
     message_uk = {t.type_code: t.message_uk for t in load_thresholds(conn)}
     rows = [{**_marker_row(m, names), "pending": False, "unverifiable": False,
              "message": message_for(m["type_code"], message_uk.get(m["type_code"]), lang)}
             for m in wanted]
+    rows += [{"code": u["code"], "name": names.get(u["code"], u["code"]), "category": "lab",
+              "value": u["value"], "comparator": u["comparator"], "text": None,
+              "unit": u["unit"], "at": u["effective_at"], "pending": False,
+              "unverifiable": True, "limit": u["comparator"] is not None, "message": None}
+             for u in unverifiable]
     for p in alarming:
         critical = p["status"] == "critical"
         rows.append({**_pending_row(p, names), "pending": True,
@@ -147,6 +166,7 @@ def overview(conn, lang: str = "en") -> dict:
     prof = facts["profile"]
     in_range = sum(m["status"] == "normal" for m in markers)
     out_of_range = [m for m in markers if m["status"] in ("low", "high")]
+    still_open = {r["type_code"]: r for r in q.open_results(conn, uid)["open"]}
     n_critical = sum(m["status"] == "critical" for m in markers)
     pending = facts["pending"]
     ordered = sorted(pending, key=lambda p: (not is_alarming(p), not p["unmapped"]))
@@ -182,12 +202,14 @@ def overview(conn, lang: str = "en") -> dict:
             "last_panel_pending": last_panel_pending,
         },
         "attention": {
-            "critical": _critical(markers, pending, names, lang, conn),
+            "critical": _critical(markers, pending, names, lang, conn,
+                                  facts["unverifiable_approved"]),
             "disclaimer": DISCLAIMER,
             "pending": {"total": len(pending),
                         "unmapped": sum(bool(p["unmapped"]) for p in pending),
                         "rows": [_pending_row(p, names) for p in ordered[:PENDING_ROWS]]},
-            "out_of_range": [_marker_row(m, names) for m in out_of_range],
+            "out_of_range": [_out_row(m, names, still_open.get(m["type_code"]))
+                             for m in out_of_range],
             "screening": _screening(conn, uid),
             "not_checked": {
                 "months": STALE_MONTHS,

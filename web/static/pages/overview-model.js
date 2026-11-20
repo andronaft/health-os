@@ -1,7 +1,7 @@
 // What the Overview page says, from what /api/v1/overview sends. Nothing here touches the page, so
 // the wording can be tested without a browser (tests/web_ui.test.mjs).
 
-import { formatDate } from "../components.js";
+import { chartRange, formatDate } from "../components.js";
 import { t } from "../strings.js";
 
 /** A stored word's translation, or the word itself if it is not one the table knows. */
@@ -78,10 +78,18 @@ export function lastPanelText({ last_panel: date, last_panel_pending: pending })
   return t(pending ? "overview.coverage.last_panel_pending" : "overview.coverage.last_panel", { date: formatDate(date) });
 }
 
-export function pendingNote({ critical, unverifiable, unmapped }) {
+export function pendingNote({ critical, unverifiable, unmapped, limit }) {
   if (critical) return t("overview.pending.flag_critical");
-  if (unverifiable) return t("overview.pending.flag_unverifiable");
+  if (unverifiable) return t(limit ? "overview.pending.flag_limit" : "overview.pending.flag_unverifiable");
   return unmapped ? t("overview.pending.flag_unmapped") : "";
+}
+
+/** What an out-of-range row adds: how long it has been out of range, a newer value under review. */
+export function outNote({ streak, since, newer_pending: newer }) {
+  const parts = [];
+  if (streak > 1) parts.push(t("overview.out.streak", { n: streak, date: formatDate(since) }));
+  if (newer) parts.push(t("overview.out.newer_pending"));
+  return parts.join(". ");
 }
 
 /** A row's name; a marker the system doesn't recognize keeps its wording from the form, in quotes. */
@@ -94,6 +102,16 @@ export function staleText({ name, last, months }) {
 }
 
 export const kindWord = (kind) => word("kind", kind);
+
+/** An event's details; a lab panel without a title says its size and what is out of range. */
+export function eventDetails({ kind, title, pending, values, out_of_range: out }) {
+  if (title || kind !== "panel" || values === null || values === undefined) return title ?? "";
+  // under review: only its size; the pending pill beside it says the rest
+  return t(out && !pending ? "overview.event.panel_out" : "overview.event.panel", { n: values, out });
+}
+
+/** Where a marker's name links to: its Labs page, if it is a lab marker. */
+export const markerHref = ({ code, category }) => (category === "lab" ? `#/labs/${encodeURIComponent(code)}` : null);
 
 // an average's decimals would be false precision: blood pressure is read in whole mmHg
 const tileNumber = (tile, value) => String(tile.average_days ? Math.round(value) : value);
@@ -145,16 +163,18 @@ const FEW_POINTS = 8; // with fewer, every point gets a dot: a line alone would 
 
 /**
  * The tile's chart: no axes, one 2px line per series and a dot on the last point, over the whole
- * window, so that two weeks of readings fill half of it. The tooltip paints on the chart's own
+ * window, so that two weeks of readings fill half of it. Its height spans at least 5% of the
+ * values (chartRange), so a tiny change doesn't look like a large one. The tooltip paints on the chart's own
  * canvas, far too small for it here, so hovering only moves the pointer; the tile's readout says
  * the values.
  */
 export function sparklineOption(tile, { from, to }) {
+  const range = chartRange(tile.series.flatMap(({ points }) => points.map(({ value }) => value)));
   return {
     animation: false,
     grid: { left: 6, right: 6, top: 6, bottom: 6 },
     xAxis: { type: "time", min: Date.parse(from), max: Date.parse(to), show: false },
-    yAxis: { type: "value", min: "dataMin", max: "dataMax", show: false },
+    yAxis: { type: "value", min: range?.[0] ?? "dataMin", max: range?.[1] ?? "dataMax", show: false },
     tooltip: { trigger: "axis", showContent: false },
     series: tile.series.map(({ name, points }) => ({
       type: "line",

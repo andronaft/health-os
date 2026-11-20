@@ -14,7 +14,7 @@ import json
 
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DataError, IntegrityError, OperationalError
 
 from mcp_server import tools, write_tools
 from prompts.system_prompt import SYSTEM_PROMPT
@@ -25,9 +25,20 @@ mcp = MCPServer("health-os", instructions=SYSTEM_PROMPT)
 
 # Tool annotations let clients auto-allow reads and ask the user before writes. Approving a
 # staged panel turns unverified values into facts — marked destructive so clients confirm it.
+def _first_line(e: BaseException) -> str:
+    # the driver's first line names the problem ("value too long for type character
+    # varying(20)"); the lines after it quote the SQL, which the agent doesn't need
+    return (str(getattr(e, "orig", None) or e).splitlines() or [""])[0][:200]
+
+
 def _db_guard(fn):
     """A database that isn't answering (Docker Desktop stopped, Postgres down) used to surface as
-    a bare "Error executing tool". Say what's wrong and how to fix it instead."""
+    a bare "Error executing tool". Say what's wrong and how to fix it instead.
+
+    A value the database or a check rejects (a non-UUID id, "2026-02-30", a too-long string, a
+    duplicate) is the caller's input, not a crash: it comes back as {"error", "detail"} with the
+    reason only — no stack trace, no SQL — so the agent can fix the argument and retry. The
+    transaction was already rolled back by the `engine.begin()` block it escaped from."""
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         try:
@@ -37,8 +48,17 @@ def _db_guard(fn):
                 "error": "database unreachable",
                 "hint": "Postgres isn't answering. On a local install start Docker Desktop "
                         "(container health_os_db) and retry.",
-                "detail": str(e.orig or e).splitlines()[0][:200],
+                "detail": _first_line(e),
             }, ensure_ascii=False)
+        except DataError as e:
+            return json.dumps({"error": "invalid value", "detail": _first_line(e)},
+                              ensure_ascii=False)
+        except IntegrityError as e:
+            return json.dumps({"error": "rejected by a database constraint",
+                               "detail": _first_line(e)}, ensure_ascii=False)
+        except ValueError as e:
+            return json.dumps({"error": "invalid input", "detail": _first_line(e)},
+                              ensure_ascii=False)
     return wrapper
 
 
@@ -94,8 +114,10 @@ def get_health_summary() -> str:
 @mcp.tool(annotations=READ)
 @_db_guard
 def query_observations(type_code: str, days: int = 365) -> str:
-    """Values of a marker (e.g. 'cholesterol_total') over N days. >90 days → weekly
-    aggregation min/avg/max. Only confirmed (approved) values."""
+    """Values of a marker (e.g. 'cholesterol_total') over N days, newest first: each with its
+    status, unit, the form's range and any text result or limit (">600"). Only when there are
+    more than 200 values over more than 90 days, they come back as weekly min/avg/max buckets
+    that still count out-of-range and critical values. Only confirmed (approved) values."""
     return tools.query_observations(type_code, days)
 
 
@@ -202,7 +224,8 @@ def list_pending_reviews() -> str:
     facts or use them in trends; show them so the user can compare with the original report and
     then approve via approve_staged_source. Rows with unmapped=true have no marker type yet (only
     the printed raw_name): ask the user which marker it is, then map_pending_observation.
-    Approved values are read with query_observations."""
+    Returns {rows, truncated}: newest first, at most 200 rows; truncated=true means older
+    pending values exist beyond them. Approved values are read with query_observations."""
     return tools.list_pending_reviews()
 
 
@@ -226,6 +249,18 @@ def get_anomalies(type_code: str = "", days: int = 90, z_threshold: float = 2.0)
     long lab histories. type_code: limit to one marker. A deviation from the user's own history
     is not a diagnosis — present it as "worth repeating / discussing", never as alarming."""
     return tools.get_anomalies(type_code, days, z_threshold)
+
+
+@mcp.tool(annotations=READ)
+@_db_guard
+def get_open_results(days: int = 36500) -> str:
+    """Lab results still waiting for a follow-up: every lab marker whose latest approved value is
+    out of range (low/high/critical) with nothing approved measuring it since, oldest first,
+    with since when it has been out of range (values_in_a_row) and whether a newer value is
+    awaiting review. Use for "did anything abnormal never get re-checked?" and before a doctor
+    visit. Say "not re-measured in the system since <date>", never how soon to re-test: that is
+    the doctor's call. days: how far back to look (default: all time)."""
+    return tools.get_open_results(days)
 
 
 @mcp.tool(annotations=READ)
@@ -266,7 +301,8 @@ def get_trend(type_code: str, days: int = 1825) -> str:
 def prepare_doctor_visit(specialty: str = "") -> str:
     """One-call briefing to take to a doctor: the deterministic health summary, the latest
     abnormal approved values (high/low/critical, up to 15), screenings that are due or overdue,
-    the number of values awaiting review, and a disclaimer. Use before an appointment or when
+    which out-of-range results were never re-measured since (still_out_of_range), the number of
+    values awaiting review, and a disclaimer. Use before an appointment or when
     the user asks "what should I tell my doctor". specialty: optional label echoed in the output
     (content is not filtered by specialty yet)."""
     return tools.prepare_doctor_visit(specialty)
@@ -310,8 +346,10 @@ def check_medication_safety(paracetamol_products: list[dict] | None = None,
     Returns the standard refusal to assess interactions (a doctor/pharmacist must check) plus
     deterministic checks: total daily paracetamol across products and biotin interference with
     lab tests. paracetamol_products: [{name, mg_per_dose, doses_per_day}] — include combination
-    cold/flu remedies; if omitted, current medications are used. planned_tests: marker codes
-    (e.g. ["tsh", "ferritin"])."""
+    cold/flu remedies with the mg of paracetamol per dose. Paracetamol among the current
+    medications (by name, brand or ATC code) is always counted too; a product passed under its
+    recorded name replaces that entry. planned_tests: marker codes, any case
+    (e.g. ["TSH", "ferritin"])."""
     return tools.check_medication_safety(paracetamol_products, taking_biotin, planned_tests)
 
 
@@ -335,7 +373,8 @@ def health_assistant() -> str:
 def set_profile(date_of_birth: str, sex: str, blood_type: str = "",
                 height_cm: float | None = None, emergency_contact: str = "") -> str:
     """Create or update the user's profile. Needed by age/sex-dependent features: reference
-    ranges, screening calendar, risk calculators. date_of_birth: YYYY-MM-DD; sex: male / female;
+    ranges, screening calendar, risk calculators. date_of_birth: YYYY-MM-DD, not in the future;
+    sex: male / female (any case; m / f also accepted);
     blood_type: e.g. A+ (optional); height_cm (optional); emergency_contact: name and phone of a
     trusted person (optional — crisis_resources shows it). Calling again overwrites the profile."""
     return write_tools.set_profile(date_of_birth, sex, blood_type, height_cm, emergency_contact)
@@ -360,7 +399,8 @@ def record_diagnosis(diagnosis_name: str, diagnosed_at: str, icd10_code: str = "
                      verification_status: str = "confirmed", severity: str = "") -> str:
     """Add a diagnosis (stored immediately as approved, with manual provenance).
     diagnosis_name: as written by the doctor; diagnosed_at: YYYY-MM-DD; icd10_code: optional;
-    clinical_status: active (default) / resolved; verification_status: confirmed
+    diagnosed_at not in the future; clinical_status: active (default) / recurrence / relapse /
+    inactive / remission / resolved; verification_status: confirmed
     (default) / provisional / suspected / differential / refuted — use suspected or provisional
     for anything not confirmed by a doctor; severity: optional. Check get_diagnoses first to
     avoid duplicates."""
@@ -463,11 +503,13 @@ def log_meal(description: str, meal_type: str = "", eaten_at: str = "", portion:
     added_sugar/saturated_fat/omega3/sodium/potassium/calcium/iron/magnesium/zinc/vitamin_a/
     vitamin_c/vitamin_d/vitamin_b12/folate_b9/water/caffeine/alcohol/...). added_sugar —
     sugar ADDED to the dish (not natural from fruit/milk). The full-profile estimate is made by
-    the model (including from a photo). glycemic_index/glycemic_load — per meal; symptoms/wellbeing —
+    the model (including from a photo); amounts are ≥ 0. glycemic_index (0–100)/glycemic_load —
+    per meal; symptoms/wellbeing —
     reaction after eating. Daily totals go by the date of eaten_at: when the user logs a meal
     later (e.g. lunch in the evening, yesterday's dinner after midnight), pass when it was
-    eaten, not now; a time_check in the response means the time looks wrong — confirm it with
-    the user. Review — query_food; daily norms — query_nutrition."""
+    eaten, not now (more than a day ahead is refused); a time_check in the response means the
+    time looks wrong — confirm it with the user. Review — query_food; daily norms —
+    query_nutrition."""
     return write_tools.log_meal(description, meal_type, eaten_at, portion, nutrients,
                                 glycemic_index, glycemic_load, symptoms, wellbeing,
                                 nutrient_source, notes)
@@ -481,7 +523,8 @@ def save_meal_template(name: str, meal_type: str = "", description: str = "",
     in one call with log_from_template. name: short unique key (e.g. "oatmeal"); meal_type:
     breakfast / lunch / dinner / snack / drink; description: what it contains; nutrients:
     {nutrient_code: amount} for ONE portion, same codes as log_meal (energy_kcal, protein, fiber,
-    sodium, vitamin_c, …); glycemic_index: optional. See list_meal_templates for existing ones."""
+    sodium, vitamin_c, …) — an unknown code is refused; glycemic_index: optional. See
+    list_meal_templates for existing ones."""
     return write_tools.save_meal_template(name, meal_type, description, nutrients, glycemic_index)
 
 
@@ -515,7 +558,8 @@ def delete_meal(food_log_id: str) -> str:
 def log_from_template(name: str, portion_factor: float = 1.0, eaten_at: str = "",
                       wellbeing: str = "", symptoms: str = "") -> str:
     """Log a meal from a saved template in one call: copies the template's nutrients multiplied
-    by portion_factor (1.0 = one portion, 1.5 = one and a half). name: template name (see
+    by portion_factor (> 0; 1.0 = one portion, 1.5 = one and a half). Template amounts that
+    aren't numbers are left out and listed in `skipped`. name: template name (see
     list_meal_templates); eaten_at: 'YYYY-MM-DD HH:MM' (default now); wellbeing / symptoms: the
     user's state after eating (optional). For a meal without a template use log_meal."""
     return write_tools.log_from_template(name, portion_factor, eaten_at, wellbeing, symptoms)

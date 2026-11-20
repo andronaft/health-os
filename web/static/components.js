@@ -30,12 +30,30 @@ export function statusKey(status) {
 
 export const statusWord = (status) => t(`status.${statusKey(status)}`);
 
+export const statusIcon = (status) => STATUS_ICONS[statusKey(status)];
+
 /** The word and the icon say it; the colour only repeats it. */
 export function statusPill(status) {
   const key = statusKey(status);
   return el("span", { class: "pill", "data-status": key },
-    el("span", { class: "pill-icon", "aria-hidden": "true" }, STATUS_ICONS[key]),
+    el("span", { class: "pill-icon", "aria-hidden": "true" }, statusIcon(key)),
     statusWord(key));
+}
+
+const MIN_SPAN_SHARE = 0.05;
+
+/**
+ * [low, high] for a small chart's value axis: the data's own range, widened around its middle to
+ * at least 5% of the values' size. Stretching min..max over the full height would draw 68.35 →
+ * 68.4 kg as a cliff; a series that never changes still sits on the middle line.
+ */
+export function chartRange(values, share = MIN_SPAN_SHARE) {
+  const finite = values.filter(Number.isFinite);
+  if (!finite.length) return null;
+  const [low, high] = [Math.min(...finite), Math.max(...finite)];
+  const middle = (low + high) / 2;
+  const span = Math.max(high - low, Math.abs(middle) * share);
+  return span ? [middle - span / 2, middle + span / 2] : [low, high];
 }
 
 /** The date part of what the API sends: the same date get_health_summary prints for that value. */

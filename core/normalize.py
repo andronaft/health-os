@@ -96,15 +96,31 @@ _DIMENSION_OF = {u: d for d, units in _DIMENSIONS.items() for u in units}
 
 def units_incompatible(unit: str | None, canonical_unit: str | None) -> bool:
     """True only when both units are recognized and belong to different dimensions."""
-    a, b = _DIMENSION_OF.get(canonicalize_unit(unit) or ""), _DIMENSION_OF.get(canonical_unit or "")
+    a = _DIMENSION_OF.get(canonicalize_unit(unit, canonical_unit) or "")
+    b = _DIMENSION_OF.get(canonical_unit or "")
     return a is not None and b is not None and a != b
 
 
-def canonicalize_unit(unit: str | None) -> str | None:
-    """Map a unit as printed on a form to its canonical spelling; unknown → stripped original."""
+# "G/L" (giga per litre = 10^9/L) and "T/L" (tera = 10^12/L) — blood counts on FR/CH/DE/ES forms.
+# Only the capital letter says so: lower-cased, "G/L" became g/L (grams), so platelets 25 G/L
+# failed the dimension gate and were stored unmapped, never checked against the critical threshold.
+_SI_COUNT_UNITS = {"G/L": "10*9/L", "G/l": "10*9/L", "T/L": "10*12/L", "T/l": "10*12/L"}
+
+
+def canonicalize_unit(unit: str | None, target: str | None = None) -> str | None:
+    """Map a unit as printed on a form to its canonical spelling; unknown → stripped original.
+
+    `target` — the matched type's canonical unit, when known. "G/L" is a count (10^9/L) by
+    default, but an all-caps form may print haemoglobin 145 "G/L" meaning grams: for a type that
+    isn't a count, the grams reading is the only one that fits, so it is kept.
+    """
     if unit is None or not unit.strip():
         return None
-    return _UNIT_BY_KEY.get(_unit_key(unit), unit.strip())
+    by_key = _UNIT_BY_KEY.get(_unit_key(unit), unit.strip())
+    si = _SI_COUNT_UNITS.get(_WS.sub("", unit))  # case-sensitive, unlike the key
+    if si is None or (target is not None and _DIMENSION_OF.get(target, "count") != "count"):
+        return by_key
+    return si
 
 
 @dataclass
@@ -170,13 +186,13 @@ def convert_to_canonical(
 
 def normalize(raw_name: str, value: float | None, unit: str | None, conn) -> NormResult:
     """Full pass: name → type; value+unit → canonical (with the unit gate)."""
-    unit = canonicalize_unit(unit)
     t = find_type(raw_name, conn)
     if t is None:
         return NormResult(raw_name, None, None, None, None, None, None,
                           unknown_type=True, conversion_missing=False)
 
     canonical_unit = t["canonical_unit"]
+    unit = canonicalize_unit(unit, canonical_unit)
     value_canonical: float | None = None
     conversion_missing = False
 
@@ -220,3 +236,27 @@ def compute_status(
     if ref_min is not None and value < ref_min:
         return "low"
     return "normal"
+
+
+def compute_limit_status(comparator: str | None, value: float | None, ref_min: float | None,
+                         ref_max: float | None) -> str | None:
+    """Status of a value printed as a limit (">600", "<0.5"), only when the limit decides it:
+    ">600" with range 70–100 is high, "<0.5" with range 0–5 is in range. ">2" with range 0–5
+    may be in range or high: None, never a guess."""
+    if comparator is None:
+        return compute_status(value, ref_min, ref_max)
+    if value is None or (ref_min is None and ref_max is None):
+        return None
+    if comparator in (">", ">="):
+        if ref_max is not None and value >= ref_max:
+            return "high"
+        if ref_max is None and (ref_min is None or value >= ref_min):
+            return "normal"
+        return None
+    if ref_min is not None and ref_min <= 0:
+        ref_min = None  # "0–5": a concentration can't be below 0, so "<0.5" is in range
+    if ref_min is not None and value <= ref_min:
+        return "low"
+    if ref_min is None and (ref_max is None or value <= ref_max):
+        return "normal"
+    return None

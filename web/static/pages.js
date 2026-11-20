@@ -4,7 +4,7 @@
 
 export const PAGES = [
   { id: "overview", title: "nav.overview", load: () => import("./pages/overview.js") },
-  { id: "labs", title: "nav.labs" },
+  { id: "labs", title: "nav.labs", load: () => import("./pages/labs.js") },
   { id: "vitals", title: "nav.vitals" },
   { id: "timeline", title: "nav.timeline" },
   { id: "medications", title: "nav.medications" },

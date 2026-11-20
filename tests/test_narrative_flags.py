@@ -77,7 +77,7 @@ def test_spanish_benign_text_is_clean(text):
     assert not is_critical(text), text
 
 
-def test_negation_is_not_handled_by_design():
+def test_negation_of_findings_is_not_handled_by_design():
     # "can't be ruled out" reads like a negation and is exactly what must fire
     assert is_critical("No se puede descartar malignidad")
     assert is_critical("Sin signos de trombosis")      # high recall: a human dismisses it
@@ -98,3 +98,93 @@ def test_aortic_dissection_in_every_language():
 def test_folding_keeps_ukrainian_letters():
     # Latin accents are folded; й/ї must survive or "негайне" stops matching
     assert "urgent" in _cats("Рекомендовано негайне звернення до лікаря")
+
+
+# --- radiology scales: the phrasings reports actually use -----------------------------------
+@pytest.mark.parametrize(("text", "category"), [
+    ("BI-RADS category 4: suspicious abnormality, biopsy should be considered", "birads"),
+    ("BI-RADS IV", "birads"),
+    ("BI-RADS V", "birads"),
+    ("BI-RADS 4C", "birads"),
+    ("BIRADS 4a", "birads"),
+    ("BI-RADS® 5", "birads"),
+    ("BI-RADS 6 (known biopsy-proven malignancy)", "birads"),
+    ("Bi-RADS: categoría 4", "birads"),
+    ("BI-RADS категорія 4", "birads"),
+    ("BI-RADS 3-4", "birads"),                   # a range ending in a suspicious grade
+    ("PI-RADS v2.1 score 5", "pirads"),
+    ("PI-RADS 4", "pirads"),
+    ("ACR TI-RADS TR5", "tirads"),
+    ("TI-RADS 4b", "tirads"),
+    ("EU-TIRADS 5", "tirads"),
+    ("Nodule TR4, 14 mm", "tirads"),
+    ("Lung-RADS 4B", "lungrads"),
+    ("Lung-RADS v2022 category 4X", "lungrads"),
+    ("Lung-RADS 4A", "lungrads"),
+    ("Bosniak IV", "bosniak"),
+    ("Bosniak category III", "bosniak"),
+    ("Bosniak 3", "bosniak"),
+])
+def test_scale_grade_flags(text, category):
+    assert category in _cats(text), text
+
+
+@pytest.mark.parametrize("text", [
+    "BI-RADS 0", "BI-RADS 1", "BI-RADS 2", "BI-RADS 3", "BI-RADS II", "BI-RADS III",
+    "BI-RADS 3, control a 6 meses",              # a follow-up interval, not a grade
+    "BI-RADS 3 a 6 meses",
+    "BI-RADS 3 - 6 months follow-up",
+    "ACR TI-RADS TR3", "TI-RADS TR2", "TR3",
+    "PI-RADS 2", "PI-RADS v2.1 score 3", "PI-RADS v2.1: 2",
+    "Lung-RADS 2", "Lung-RADS 3",
+    "Bosniak II", "Bosniak IIF", "Bosniak 2F",
+])
+def test_benign_scale_grade_is_clean(text):
+    assert not is_critical(text), text
+
+
+# --- "suspicious": flags, unless plainly negated in its own clause ----------------------------
+@pytest.mark.parametrize("text", [
+    "Suspicious mass",
+    "Suspicious microcalcifications in the upper outer quadrant",
+    "Nódulo sospechoso",
+    "Lesión sospechosa de malignidad",
+    "Підозріле утворення",
+    "Подозрительный очаг",
+    # not negations, or negations of something else
+    "No suspicious findings, but a suspicious nodule in the left breast",
+    "No change in the suspicious lesion",
+    "No se puede descartar lesión sospechosa",
+    "Cannot exclude suspicious calcifications",
+    "No mass. Suspicious calcifications",
+    "No masses, suspicious calcifications",          # a comma ends the negation's reach
+])
+def test_suspicious_flags(text):
+    assert "suspicion" in _cats(text), text
+
+
+@pytest.mark.parametrize("text", [
+    "No suspicious findings",
+    "No suspicious findings. BI-RADS 1.",
+    "There are no suspicious masses or calcifications",
+    "No masses or suspicious calcifications",
+    "No evidence of suspicious lymph nodes",
+    "Without suspicious features",
+    "The nodule is not suspicious",
+    "Non-suspicious calcifications",
+    "Sin hallazgos sospechosos",
+    "No se observan lesiones sospechosas",
+    "Sin adenopatías ni lesiones sospechosas",
+    "Без підозрілих змін",
+    "Підозрілих утворень не виявлено",
+    "Без подозрительных очагов",
+    "Подозрительных образований не выявлено",
+])
+def test_negated_suspicious_is_clean(text):
+    assert not is_critical(text), text
+
+
+def test_negating_suspicious_never_hides_another_finding():
+    # the negation is for the bare word only: malignancy / BI-RADS still fire
+    assert "malignancy" in _cats("No findings suspicious for malignancy")
+    assert "birads" in _cats("No suspicious findings in the right breast. Left: BI-RADS 4")

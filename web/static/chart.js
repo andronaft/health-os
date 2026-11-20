@@ -10,7 +10,8 @@ const resizer = new ResizeObserver((entries) => {
   for (const { target } of entries) live.get(target)?.resize();
 });
 
-function tokenColor(name) {
+/** A CSS colour token's current value, for what paints on a canvas. */
+export function tokenColor(name) {
   const probe = document.createElement("span");
   probe.style.color = `var(${name})`; // setting it from a script is fine under the CSP
   document.body.append(probe);
@@ -82,4 +83,25 @@ document.addEventListener("themechange", () => {
   disposeDetached();
   const theme = chartTheme();
   for (const instance of live.values()) instance.setTheme(theme);
+});
+
+// Paper is light whatever the screen's theme: the print styles switch the page's tokens to light,
+// and the canvases are repainted with them for the print, then back.
+let themeBeforePrint;
+window.addEventListener("beforeprint", () => {
+  if (!live.size) return;
+  const root = document.documentElement;
+  themeBeforePrint = root.dataset.theme ?? null;
+  root.dataset.theme = "light";
+  document.dispatchEvent(new Event("themechange"));
+  for (const instance of live.values()) instance.resize();
+});
+window.addEventListener("afterprint", () => {
+  if (themeBeforePrint === undefined) return;
+  const root = document.documentElement;
+  if (themeBeforePrint === null) delete root.dataset.theme;
+  else root.dataset.theme = themeBeforePrint;
+  themeBeforePrint = undefined;
+  document.dispatchEvent(new Event("themechange"));
+  for (const instance of live.values()) instance.resize();
 });

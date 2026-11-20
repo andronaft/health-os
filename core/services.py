@@ -13,15 +13,24 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from core.health_summary import read_unverifiable_approved
 from core.normalize import (
+    canonicalize,
     canonicalize_unit,
-    compute_status,
+    compute_limit_status,
     convert_to_canonical,
     find_type,
     normalize,
     units_incompatible,
 )
-from safety.critical_values import CriticalHit, evaluate, load_thresholds
+from safety.critical_values import (
+    ABOVE,
+    BELOW,
+    CriticalHit,
+    evaluate,
+    evaluate_limit,
+    load_thresholds,
+)
 
 
 # --------------------------------------------------------------------------- users/profile
@@ -32,8 +41,49 @@ def get_or_create_user(conn) -> str:
     return str(conn.execute(text("INSERT INTO users DEFAULT VALUES RETURNING id")).scalar())
 
 
+# Sex is stored as "male"/"female": the screening rules compare with exactly these, and "Male"
+# silently dropped the male-only screenings. Only spellings that map without guessing.
+_SEX = {"male": "male", "m": "male", "чоловіча": "male", "hombre": "male",
+        "female": "female", "f": "female", "жіноча": "female", "mujer": "female"}
+
+
+def normalize_sex(sex) -> str:
+    """"Male", " M ", "жіноча" → male/female; anything else is rejected (ValueError) with the
+    accepted values, never stored as free text."""
+    key = str(sex or "").strip().lower()
+    if key not in _SEX:
+        raise ValueError(f"sex “{sex}” is not recognised — use male or female "
+                         f"(also accepted: {', '.join(k for k in _SEX if k not in _SEX.values())})")
+    return _SEX[key]
+
+
+def _past_date(field: str, value, *, required: bool = True) -> date | None:
+    """A date that has already happened: a date object or YYYY-MM-DD. Raises ValueError with a
+    message the agent can act on ("diagnosed_at 2026-02-30 is not a date")."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        if required:
+            raise ValueError(f"{field} is required (YYYY-MM-DD)")
+        return None
+    if isinstance(value, datetime):
+        d = value.date()
+    elif isinstance(value, date):
+        d = value
+    else:
+        try:
+            d = date.fromisoformat(str(value).strip())
+        except ValueError:
+            raise ValueError(f"{field} {value} is not a date (YYYY-MM-DD)") from None
+    if d > date.today():
+        raise ValueError(f"{field} {d} is in the future")
+    return d
+
+
 def upsert_profile(conn, user_id: str, *, date_of_birth, sex, blood_type=None,
                    rh_factor=None, height_cm=None, emergency_contact=None) -> None:
+    """Create or overwrite the profile. A date of birth in the future gave a negative age and a
+    screening calendar for it; an unrecognised sex dropped the sex-specific screenings."""
+    date_of_birth = _past_date("date_of_birth", date_of_birth)
+    sex = normalize_sex(sex)
     conn.execute(
         text(
             """
@@ -82,8 +132,23 @@ def manual_source(conn, user_id: str, channel: str = "manual",
 
 
 # --------------------------------------------------------------------------- safety-critical entities
+def _required_text(field: str, value, max_len: int) -> str:
+    s = str(value or "").strip()
+    if not s:
+        raise ValueError(f"{field} is required")
+    if len(s) > max_len:
+        raise ValueError(f"{field} is longer than {max_len} characters")
+    return s
+
+
 def add_allergy(conn, user_id: str, allergen: str, *, allergen_type=None, reaction=None,
                 severity=None, verified: bool = False, notes=None) -> str:
+    """Record an allergy (auto-approved). A blank allergen used to be stored as an allergy to
+    nothing; it is rejected (ValueError) like an over-long severity (the column holds 20)."""
+    allergen = _required_text("allergen", allergen, 200)
+    if severity is not None and len(str(severity)) > 20:
+        raise ValueError("severity is longer than 20 characters — use mild / moderate / severe "
+                         "and put the details into reaction")
     sid = manual_source(conn, user_id)
     return str(
         conn.execute(
@@ -100,9 +165,29 @@ def add_allergy(conn, user_id: str, allergen: str, *, allergen_type=None, reacti
     )
 
 
+# The two status axes (FHIR Condition). The summary and the views compare with these exact
+# lower-case values: "Confirmed" or "yes" stored as typed left a diagnosis on no axis at all.
+CLINICAL_STATUSES = ("active", "recurrence", "relapse", "inactive", "remission", "resolved")
+VERIFICATION_STATUSES = ("confirmed", "provisional", "suspected", "differential", "refuted")
+
+
+def _status(field: str, value, allowed: tuple[str, ...]) -> str:
+    s = str(value or "").strip().lower()
+    if s not in allowed:
+        raise ValueError(f"{field} “{value}” is not one of {' / '.join(allowed)}")
+    return s
+
+
 def add_diagnosis(conn, user_id: str, diagnosis_name: str, *, diagnosed_at,
                   icd10_code=None, clinical_status="active",
                   verification_status="confirmed", severity=None, notes=None) -> str:
+    """Record a diagnosis (auto-approved). Rejects (ValueError) an empty name, a status outside
+    the two axes, and a diagnosis date that is not a real past date."""
+    diagnosis_name = _required_text("diagnosis_name", diagnosis_name, 300)
+    diagnosed_at = _past_date("diagnosed_at", diagnosed_at)
+    clinical_status = _status("clinical_status", clinical_status, CLINICAL_STATUSES)
+    verification_status = _status("verification_status", verification_status,
+                                  VERIFICATION_STATUSES)
     sid = manual_source(conn, user_id)
     return str(
         conn.execute(
@@ -350,7 +435,12 @@ def add_food_log(conn, user_id: str, description: str, *, eaten_at, meal_type=No
     The model provides the estimate (including from a photo); the schema is source-agnostic
     (USDA-ready). Unknown codes are skipped and returned in unknown_codes (we don't invent them).
     No unit gate / critical values — hence no staging/approve, like diagnoses/medications.
+    Impossible values are rejected before anything is written (see _check_meal).
     """
+    err = _check_meal(eaten_at=eaten_at, nutrients=nutrients, glycemic_index=glycemic_index,
+                      glycemic_load=glycemic_load)
+    if err:
+        return {"error": err}
     sid = manual_source(conn, user_id)
     food_id = str(
         conn.execute(
@@ -376,6 +466,49 @@ def add_food_log(conn, user_id: str, description: str, *, eaten_at, meal_type=No
     if note:
         out["time_check"] = note
     return out
+
+
+# a meal may be logged a little ahead of the clock (time zones, "dinner at 21:00" said at
+# 20:50); further ahead is a typo, and analytics would count it in every window until then
+MEAL_FUTURE_SLACK = timedelta(days=1)
+
+
+def _amount(v) -> float | None:
+    """A nutrient amount as a number, or None if it isn't one (None, "12 g", NaN, True)."""
+    import math
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return x if math.isfinite(x) else None
+
+
+def _check_meal(*, eaten_at=None, nutrients: dict | None = None, glycemic_index=None,
+                glycemic_load=None) -> str | None:
+    """Values that can't be true for a meal: a time far in the future, a negative or
+    non-numeric nutrient amount, a glycemic index outside 0–100, a negative glycemic load.
+    They used to be stored and then summed into the daily totals (−300 g of protein)."""
+    if isinstance(eaten_at, datetime):
+        now = datetime.now(eaten_at.tzinfo) if eaten_at.tzinfo else datetime.now()
+        if eaten_at > now + MEAL_FUTURE_SLACK:
+            return (f"eaten_at {eaten_at:%Y-%m-%d %H:%M} is in the future — check the date "
+                    "(when was it eaten?)")
+    if glycemic_index is not None:
+        gi = _amount(glycemic_index)
+        if gi is None or not 0 <= gi <= 100:
+            return f"glycemic_index {glycemic_index} is outside 0–100"
+    if glycemic_load is not None:
+        gl = _amount(glycemic_load)
+        if gl is None or gl < 0:
+            return f"glycemic_load {glycemic_load} must be a number ≥ 0"
+    bad = [f"{k}={v}" for k, v in (nutrients or {}).items()
+           if v is not None and (_amount(v) is None or _amount(v) < 0)]
+    if bad:
+        return (f"nutrient amounts must be numbers ≥ 0 (in the nutrient's unit): "
+                f"{', '.join(bad)}")
+    return None
 
 
 def _save_nutrients(conn, food_id, nutrients: dict | None) -> tuple[int, list[str]]:
@@ -462,6 +595,11 @@ def update_meal(conn, user_id: str, food_log_id: str, changes: dict,
             changes["eaten_at"] = datetime.fromisoformat(str(changes["eaten_at"]))
         except ValueError:
             return {"error": "eaten_at must be ISO 'YYYY-MM-DD HH:MM'"}
+    err = _check_meal(eaten_at=changes.get("eaten_at"), nutrients=nutrients,
+                      glycemic_index=changes.get("glycemic_index"),
+                      glycemic_load=changes.get("glycemic_load"))
+    if err:
+        return {"error": err}
 
     if changes:
         sets = ", ".join(f"{k} = :{k}" for k in changes)  # keys are whitelisted above
@@ -490,8 +628,24 @@ def delete_meal(conn, user_id: str, food_log_id: str) -> dict:
 
 def save_meal_template(conn, user_id: str, name: str, *, meal_type=None, description=None,
                        nutrients: dict | None = None, glycemic_index=None) -> str:
-    """Save/update a frequent-meal template (by name, per user)."""
+    """Save/update a frequent-meal template (by name, per user).
+
+    Rejected (ValueError), so a typo isn't found only when the template is used: a nutrient
+    code outside nutrient_types ("protien" used to be saved and then silently dropped from every
+    meal logged from it), a non-numeric or negative amount, a glycemic index outside 0–100.
+    A null amount means "not known" and is left out."""
     import json as _json
+    name = _required_text("name", name, 200)
+    nutrients = {k: v for k, v in (nutrients or {}).items() if v is not None}
+    if nutrients:
+        known = {c for (c,) in conn.execute(text("SELECT code FROM nutrient_types"))}
+        unknown = sorted(set(nutrients) - known)
+        if unknown:
+            raise ValueError(f"unknown nutrient code(s): {', '.join(unknown)} — use the codes of "
+                             f"nutrient_types (as in log_meal: energy_kcal, protein, fiber, …)")
+    err = _check_meal(nutrients=nutrients, glycemic_index=glycemic_index)
+    if err:
+        raise ValueError(err)
     nutr = _json.dumps(nutrients) if nutrients else None
     row = conn.execute(
         text(
@@ -519,7 +673,14 @@ def save_meal_template(conn, user_id: str, name: str, *, meal_type=None, descrip
 
 def log_from_template(conn, user_id: str, name: str, *, eaten_at, portion_factor: float = 1.0,
                       wellbeing=None, symptoms=None) -> dict:
-    """Log a meal from a template (nutrients × portion_factor). Calls add_food_log."""
+    """Log a meal from a template (nutrients × portion_factor). Calls add_food_log.
+
+    A template saved before amounts were checked may hold null or text ("12 g"): those nutrients
+    are left out and listed in `skipped` — they used to crash the call (TypeError/ValueError)."""
+    pf = _amount(portion_factor)
+    if pf is None or pf <= 0:
+        return {"error": f"portion_factor {portion_factor} must be a number > 0 "
+                         f"(1 = one portion, 0.5 = half)"}
     t = conn.execute(
         text(
             """SELECT meal_type, description, nutrients, glycemic_index
@@ -531,14 +692,26 @@ def log_from_template(conn, user_id: str, name: str, *, eaten_at, portion_factor
     if not t:
         return {"error": f"template “{name}” not found"}
     base = t["nutrients"] or {}
-    scaled = {k: round(float(v) * portion_factor, 3) for k, v in base.items()}
+    scaled, skipped = {}, []
+    for k, v in base.items():
+        x = _amount(v)
+        if x is None or x < 0:
+            skipped.append({"nutrient": k, "stored": v})
+        else:
+            scaled[k] = round(x * pf, 3)
     out = add_food_log(
         conn, user_id, t["description"] or name, eaten_at=eaten_at, meal_type=t["meal_type"],
         nutrients=scaled, glycemic_index=t["glycemic_index"], wellbeing=wellbeing,
         symptoms=symptoms,
     )
+    if "error" in out:
+        return out
     out["template"] = name
-    out["portion_factor"] = portion_factor
+    out["portion_factor"] = pf
+    if skipped:
+        out["skipped"] = skipped
+        out["skipped_note"] = ("These template amounts are empty, text or negative, so they "
+                               "were not logged; fix the template with save_meal_template.")
     return out
 
 
@@ -559,6 +732,7 @@ def ingest_observation(
     conn, user_id: str, raw_name: str, value: float | None, unit: str | None, *,
     effective_at: datetime | None = None, ref_min: float | None = None,
     ref_max: float | None = None, value_text: str | None = None,
+    comparator: str | None = None,
     channel: str = "manual", review_status: str = "approved",
     panel_id: str | None = None, source_id: str | None = None,
     time_precision: str = "datetime", alerter=None,
@@ -577,19 +751,31 @@ def ingest_observation(
     effective_at = effective_at or datetime.now()
     nr = normalize(raw_name, value, unit, conn)
 
-    # status — from the form's range (both in the same unit by construction)
-    status = compute_status(value, ref_min, ref_max)
+    if comparator is not None and comparator not in ABOVE + BELOW:
+        comparator = None
+    # status — from the form's range (both in the same unit by construction); a limit (">600")
+    # only when the limit decides it
+    status = compute_limit_status(comparator, value, ref_min, ref_max)
 
     # critical values — on the canonical value
     critical: CriticalHit | None = None
+    limit_unverified = False
     thresholds = load_thresholds(conn) if nr.type_code else []
     if nr.type_code and nr.value_canonical is not None and nr.canonical_unit is not None:
-        critical = evaluate(nr.type_code, nr.value_canonical, nr.canonical_unit, thresholds)
+        if comparator:
+            critical, limit_unverified = evaluate_limit(
+                nr.type_code, comparator, nr.value_canonical, nr.canonical_unit, thresholds)
+        else:
+            critical = evaluate(nr.type_code, nr.value_canonical, nr.canonical_unit, thresholds)
     # fail-safe: a critical-watch analyte whose unit we can't convert must not pass silently
     # (unless the unit says it isn't that analyte at all — then it's stored unmapped)
-    critical_unverified = (critical is None and value is not None and nr.conversion_missing
-                           and not nr.dimension_mismatch
-                           and any(t.type_code == nr.type_code for t in thresholds))
+    watched = any(t.type_code == nr.type_code for t in thresholds)
+    unit_unverified = (critical is None and value is not None and nr.conversion_missing
+                       and not nr.dimension_mismatch and watched)
+    # the unit says "not this analyte", but the name says a critical-watch one: the row goes in
+    # unmapped, and a misread unit spelling must still not hide a critical value
+    mismatch_unverified = value is not None and nr.dimension_mismatch and watched
+    critical_unverified = unit_unverified or limit_unverified or mismatch_unverified
     unmapped = nr.type_id is None or nr.dimension_mismatch
 
     needs_review = False
@@ -614,12 +800,28 @@ def ingest_observation(
         if alerter is not None:
             alerter("Health OS — critical value",
                     f"{nr.type_code} {critical.value}{critical.unit}: {critical.message}")
-    if critical_unverified:
+    if unit_unverified:
         notes.append(f"CRITICAL CHECK IMPOSSIBLE — unit “{unit}” not recognized for "
                      f"{nr.type_code}; compare the value with the form now")
         if alerter is not None:
             alerter("Health OS — verify a value",
                     f"{nr.type_code} {value} {unit}: unit not recognized, critical check impossible")
+    if mismatch_unverified:
+        notes.append(f"CRITICAL CHECK IMPOSSIBLE — “{raw_name}” reads as {nr.type_code}, but the "
+                     f"unit “{unit}” doesn't fit it; compare the value with the form now")
+        if alerter is not None:
+            alerter("Health OS — verify a value",
+                    f"{nr.type_code}? {value} {unit}: unit doesn't fit the marker, "
+                    f"critical check impossible")
+    if limit_unverified:
+        needs_review, effective_status = True, "pending"
+        notes.append(f"CRITICAL CHECK IMPOSSIBLE — the form gives only a limit "
+                     f"({comparator}{value:g} {unit or ''}), and a critical value is past it; "
+                     f"compare with the form now")
+        if alerter is not None:
+            alerter("Health OS — verify a value",
+                    f"{nr.type_code} {comparator}{value:g} {unit or ''}: only a limit, "
+                    f"critical check impossible")
     if nr.synonym_origin == "learned":
         notes.append("mapped via a learned synonym — highlight for review")
 
@@ -633,17 +835,21 @@ def ingest_observation(
         text(
             """
             INSERT INTO observations (user_id, type_id, raw_name, effective_at, time_precision,
-                value_numeric, value_text, unit, value_canonical, ref_min, ref_max,
-                status, review_status, source_id, panel_id)
-            VALUES (:uid, :tid, :raw, :eff, :tp, :vn, :vt, :u, :vc, :rmin, :rmax, :st, :rs,
-                    :sid, :pid)
+                value_numeric, comparator, value_text, unit, value_canonical, ref_min, ref_max,
+                status, review_status, source_id, panel_id, notes)
+            VALUES (:uid, :tid, :raw, :eff, :tp, :vn, :cmp, :vt, :u, :vc, :rmin, :rmax, :st, :rs,
+                    :sid, :pid, :notes)
             RETURNING id
             """
         ),
         dict(uid=user_id, tid=None if unmapped else nr.type_id, raw=raw_name, eff=effective_at,
-             tp=time_precision, vn=value, vt=value_text, u=unit,
+             tp=time_precision, vn=value, cmp=comparator if value is not None else None,
+             vt=value_text, u=unit,
              vc=None if unmapped else nr.value_canonical, rmin=ref_min, rmax=ref_max,
-             st=status, rs=effective_status, sid=sid, pid=panel_id),
+             st=status, rs=effective_status, sid=sid, pid=panel_id,
+             # an unmapped row has no type to check it by later: the flag must live on the row
+             # (health_summary.CHECK_IMPOSSIBLE_UNMAPPED_SQL reads it)
+             notes="; ".join(notes) if mismatch_unverified else None),
     ).scalar()
 
     return IngestResult(str(oid), nr, status, critical, needs_review,
@@ -681,14 +887,35 @@ def _lab_number(v) -> float | None:
     return None
 
 
+_LIMIT_SIGNS = {"<": "<", ">": ">", "<=": "<=", ">=": ">=", "≤": "<=", "≥": ">=",
+                "=<": "<=", "=>": ">="}
+
+
+def _lab_limit(v: str) -> tuple[str, float] | None:
+    """(comparator, number) from a printed limit: ">600", "< 10", "≤0,5", ">= 1.2"."""
+    import re
+    m = re.fullmatch(r"\s*(<=|>=|=<|=>|≤|≥|<|>)\s*(.+?)\s*", v)
+    if not m:
+        return None
+    num = _lab_number(m.group(2))
+    return (_LIMIT_SIGNS[m.group(1)], num) if num is not None else None
+
+
 def _coerce_lab_row(r: dict) -> tuple[dict, str | None]:
     """Models pass values as printed: "6,4", "negative", "<0.5". A numeric string becomes a
-    number; any other text goes to value_text (a qualitative result or a detection limit) —
-    a string compared with a float used to crash the whole panel, critical rows included."""
+    number; a limit (">600", "≤ 0,5") a number with its comparator; any other text goes to
+    value_text (a qualitative result) — a string compared with a float used to crash the whole
+    panel, critical rows included."""
     r = dict(r)
     note = None
     v = r.get("value")
-    if isinstance(v, str):
+    limit = _lab_limit(v) if isinstance(v, str) else None
+    if limit:
+        # ">600" (a meter's HI), "<10": a number with its comparator, so the critical check
+        # runs on it — as text it used to skip the check and the "impossible" flag alike
+        r["comparator"], r["value"] = limit
+        note = "a limit, not an exact value"
+    elif isinstance(v, str):
         num = _lab_number(v)
         if num is not None:
             r["value"] = num
@@ -728,6 +955,11 @@ def stage_panel(conn, user_id: str, panel_date, rows: list[dict], *,
 
     from ingestion.confidence import score as _confidence
 
+    # before anything is written: an empty panel used to be created, reported as staged and
+    # shown on the timeline as a lab panel with no values
+    if not rows or not isinstance(rows, list):
+        return {"error": "rows is empty — nothing to stage; pass the report's rows as "
+                         "[{raw_name, value, unit, ref_min, ref_max}, …]"}
     date_error = _check_panel_date(panel_date)
     if date_error:
         return {"error": date_error}
@@ -770,7 +1002,8 @@ def stage_panel(conn, user_id: str, panel_date, rows: list[dict], *,
                 res = ingest_observation(
                     conn, user_id, r["raw_name"], r.get("value"), r.get("unit"),
                     ref_min=r.get("ref_min"), ref_max=r.get("ref_max"),
-                    value_text=r.get("value_text"), effective_at=eff, time_precision=tp,
+                    value_text=r.get("value_text"), comparator=r.get("comparator"),
+                    effective_at=eff, time_precision=tp,
                     channel="mcp", review_status="pending", panel_id=panel_id,
                     source_id=source_id, alerter=alerter,
                 )
@@ -814,6 +1047,7 @@ def stage_panel(conn, user_id: str, panel_date, rows: list[dict], *,
             **({"rejected_match": res.normalized.type_code}
                if res.normalized.dimension_mismatch else {}),
             "value": r.get("value"),
+            **({"comparator": r["comparator"]} if r.get("comparator") else {}),
             **({"value_text": r["value_text"]} if r.get("value_text") else {}),
             "unit": r.get("unit"),
             "canonical": res.normalized.value_canonical,
@@ -850,7 +1084,11 @@ def _check_panel_duplicate(conn, user_id: str, panel_date, facility_id, rows: li
 
     codes = set()
     for r in rows:
-        t = find_type(r["raw_name"], conn)
+        # a malformed row is reported by the row loop; here it must not lose the whole panel
+        name = r.get("raw_name") if isinstance(r, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            continue
+        t = find_type(name, conn)
         if t:
             codes.add(t["code"])
     if not codes:
@@ -885,13 +1123,45 @@ def approve_staged(conn, user_id: str, source_id: str, *,
 
     Numeric rows without a canonical value (unit gate failed) would drop out of trends and
     analytics for good (#11), so they block the approval unless explicitly allowed.
+
+    A source with nothing pending (approved already, or never staged — a manual entry) is an
+    error, not "approved_observations: 0": a model reading 0 as success tells the user it's done.
+    Approved values the critical check couldn't settle (only a limit on the form, or no canonical
+    value) are returned in unverifiable_approved — approval is not a check of them.
     """
+    try:
+        uuid.UUID(str(source_id))
+    except ValueError:
+        return {"error": "source not found", "source_id": source_id}
     src = conn.execute(
         text("SELECT id FROM ingestion_sources WHERE id=:sid AND user_id=:u"),
         {"sid": source_id, "u": user_id},
     ).first()
     if not src:
         return {"error": "source not found", "source_id": source_id}
+    n_pending = conn.execute(
+        text("""SELECT count(*) FILTER (WHERE type_id IS NOT NULL) FROM observations
+                WHERE source_id=:sid AND user_id=:u AND review_status='pending'
+                  AND deleted_at IS NULL"""),
+        {"sid": source_id, "u": user_id},
+    ).scalar()
+    unmapped = conn.execute(
+        text(
+            """SELECT id, raw_name FROM observations
+               WHERE source_id=:sid AND user_id=:u AND review_status='pending'
+                 AND deleted_at IS NULL AND type_id IS NULL"""
+        ),
+        {"sid": source_id, "u": user_id},
+    ).all()
+    if not n_pending:
+        out = {"error": "nothing to approve: this source has no pending values — it was approved "
+                        "already, or it isn't a staged panel", "source_id": source_id}
+        if unmapped:
+            out["error"] = ("nothing to approve: only unmapped rows are pending — "
+                            "map_pending_observation each, then approve again")
+            out["left_pending_unmapped"] = [{"observation_id": str(i), "raw_name": rn}
+                                            for i, rn in unmapped]
+        return out
     missing = conn.execute(
         text(
             """SELECT ot.code, o.value_numeric, o.unit
@@ -919,20 +1189,15 @@ def approve_staged(conn, user_id: str, source_id: str, *,
         ),
         {"sid": source_id, "u": user_id},
     ).rowcount
-    unmapped = conn.execute(
-        text(
-            """SELECT id, raw_name FROM observations
-               WHERE source_id=:sid AND user_id=:u AND review_status='pending'
-                 AND deleted_at IS NULL AND type_id IS NULL"""
-        ),
+    # reviewed_at is when values of this source were last approved, even while unmapped rows
+    # keep the source itself pending: the weekly report dates an approval by it, and without it
+    # values approved today counted from the day they were staged and could fall out of the week
+    conn.execute(
+        text("UPDATE ingestion_sources SET reviewed_at=now(), reviewed_by='human'"
+             + ("" if unmapped else ", review_status='approved'")
+             + " WHERE id=:sid AND user_id=:u"),
         {"sid": source_id, "u": user_id},
-    ).all()
-    if not unmapped:
-        conn.execute(
-            text("UPDATE ingestion_sources SET review_status='approved', reviewed_by='human', "
-                 "reviewed_at=now() WHERE id=:sid AND user_id=:u"),
-            {"sid": source_id, "u": user_id},
-        )
+    )
     out = {"approved_observations": n, "source_id": source_id}
     if missing:
         out["approved_without_canonical"] = len(missing)
@@ -941,6 +1206,16 @@ def approve_staged(conn, user_id: str, source_id: str, *,
                                         for i, rn in unmapped]
         out["hint"] = ("Unmapped rows stay pending: map_pending_observation each, then approve "
                        "this source again.")
+    unverifiable = read_unverifiable_approved(conn, user_id, source_id=source_id)
+    if unverifiable:
+        out["unverifiable_approved"] = [
+            {k: u[k] for k in ("observation_id", "code", "value", "comparator", "unit", "why")}
+            for u in unverifiable]
+        out["warning"] = (f"{len(unverifiable)} approved value(s) could NOT be checked against "
+                          "critical thresholds (only a limit on the form, or a unit that couldn't "
+                          "be converted) — tell the user to compare them with the form now. They "
+                          "stay listed in the health summary, and in the weekly report of the "
+                          "week they were approved.")
     return out
 
 
@@ -956,8 +1231,8 @@ def map_pending_observation(conn, user_id: str, observation_id: str, type_code: 
     """
     row = conn.execute(
         text(
-            """SELECT o.id, o.type_id, o.raw_name, o.value_numeric, o.unit, o.ref_min, o.ref_max,
-                      o.status, o.panel_id, o.source_id
+            """SELECT o.id, o.type_id, o.raw_name, o.value_numeric, o.comparator, o.unit,
+                      o.ref_min, o.ref_max, o.status, o.panel_id, o.source_id
                FROM observations o
                WHERE o.id = CAST(:id AS uuid) AND o.user_id = :u
                  AND o.review_status = 'pending' AND o.deleted_at IS NULL"""
@@ -974,7 +1249,7 @@ def map_pending_observation(conn, user_id: str, observation_id: str, type_code: 
         return {"error": f"unknown type_code “{type_code}” — look it up in observation_types"}
 
     value = float(row["value_numeric"]) if row["value_numeric"] is not None else None
-    unit = canonicalize_unit(row["unit"])
+    unit = canonicalize_unit(row["unit"], t["canonical_unit"])
     if value is not None and units_incompatible(unit, t["canonical_unit"]):
         return {"error": f"unit “{row['unit']}” can't belong to {type_code} "
                          f"({t['canonical_unit']}) — pick a type with a matching unit"}
@@ -985,15 +1260,22 @@ def map_pending_observation(conn, user_id: str, observation_id: str, type_code: 
         elif unit is not None:
             value_canonical = convert_to_canonical(t["id"], value, unit, t["canonical_unit"], conn)
 
-    status = compute_status(value, row["ref_min"], row["ref_max"])
+    comparator = row["comparator"]
+    status = compute_limit_status(comparator, value, row["ref_min"], row["ref_max"])
     thresholds = load_thresholds(conn)
     critical = None
+    limit_unverified = False
     if value_canonical is not None and t["canonical_unit"] is not None:
-        critical = evaluate(type_code, value_canonical, t["canonical_unit"], thresholds)
+        if comparator:
+            critical, limit_unverified = evaluate_limit(
+                type_code, comparator, value_canonical, t["canonical_unit"], thresholds)
+        else:
+            critical = evaluate(type_code, value_canonical, t["canonical_unit"], thresholds)
     if critical:
         status = "critical"
-    critical_unverified = (value is not None and value_canonical is None
-                           and any(th.type_code == type_code for th in thresholds))
+    critical_unverified = limit_unverified or (
+        value is not None and value_canonical is None
+        and any(th.type_code == type_code for th in thresholds))
 
     conn.execute(text("SELECT set_config('app.actor', 'user', true), "
                       "set_config('app.reason', 'map_pending', true)"))
@@ -1017,7 +1299,10 @@ def map_pending_observation(conn, user_id: str, observation_id: str, type_code: 
                                                           user_id)
                         VALUES (:tid, :syn, 'learned', :oid, :u)
                         ON CONFLICT DO NOTHING"""),
-                {"tid": t["id"], "syn": row["raw_name"].strip(), "oid": row["id"], "u": user_id},
+                # stored as find_type compares it: "Glucosa (método)" with its accents stripped
+                # was saved as typed and never matched again
+                {"tid": t["id"], "syn": canonicalize(row["raw_name"]), "oid": row["id"],
+                 "u": user_id},
             )
             learned = {"saved": True}
         else:

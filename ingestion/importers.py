@@ -9,14 +9,18 @@ from __future__ import annotations
 from sqlalchemy import text
 
 from core.services import get_or_create_channel_source
-from ingestion.apple_health import daily_aggregates, parse_export
+from ingestion.apple_health import daily_aggregates, parse
 
 # write daily aggregates only for types that have observation_types
 _AGG_TO_OBS = {"heart_rate", "spo2", "body_weight", "body_temp"}
 
 
 def import_apple_health(conn, user_id: str, xml: str, alerter=None) -> dict:
-    samples, alerts = parse_export(xml)
+    """Imports an export.xml. Values are stored in canonical units; records whose unit the
+    parser doesn't know are left out and listed in `skipped_unknown_unit` (see
+    ingestion.apple_health)."""
+    parsed = parse(xml)
+    samples, alerts = parsed.samples, parsed.alerts
     source_id = get_or_create_channel_source(conn, user_id, "apple_health")
 
     # 1) raw samples → device_samples (ON CONFLICT DO NOTHING = dedup of the cumulative export)
@@ -77,8 +81,15 @@ def import_apple_health(conn, user_id: str, xml: str, alerter=None) -> dict:
                     f"Apple Watch: {al.alert_type} at {al.detected_at:%Y-%m-%d %H:%M} "
                     "(consumer device, not a diagnosis) — discuss with your doctor.")
 
-    return {"samples_inserted": inserted, "daily_observations": n_obs,
-            "device_alerts": n_alerts, "source_id": source_id}
+    out = {"samples_inserted": inserted, "daily_observations": n_obs,
+           "device_alerts": n_alerts, "source_id": source_id,
+           "skipped_unknown_unit": [
+               {"type_code": tc, "unit": unit, "records": n}
+               for (tc, unit), n in sorted(parsed.skipped_units.items(), key=lambda kv: str(kv[0]))]}
+    if parsed.skipped_units:
+        out["note"] = (f"{sum(parsed.skipped_units.values())} record(s) skipped: unit not "
+                       "recognised for the type — not stored rather than stored in the wrong unit")
+    return out
 
 
 def _canonical_unit(type_code: str) -> str:

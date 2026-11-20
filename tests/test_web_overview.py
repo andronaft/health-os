@@ -137,6 +137,11 @@ def test_the_demo_markers_add_up(demo, get):
     assert rows["ldl"]["value"] == 3.8 and rows["ldl"]["unit"] == "mmol/L"
     assert rows["ldl"]["ref_max"] == 3.0
     assert rows["ldl"]["name"] == "LDL cholesterol"  # the English name, not name_uk
+    assert rows["ldl"]["category"] == "lab"  # the page links it to its Labs page
+    # out of range since when, and whether a newer value waits (q.open_results)
+    assert rows["ldl"]["streak"] >= 1 and rows["ldl"]["since"] is not None
+    assert rows["ldl"]["newer_pending"] is False
+    assert rows["vitamin_d"]["newer_pending"] is True  # the demo's newer vitamin D is pending
 
 
 # ---- pending values never look like facts --------------------------------------------------------
@@ -348,7 +353,17 @@ def test_events_are_past_ones_newest_first(conn, user_id, get):
     events = get()["events"]
     assert [e["title"] for e in events] == ["Sample A", "Sample B"]
     assert events[0] == {"kind": "medication_start", "date": str(today - timedelta(days=5)),
-                         "title": "Sample A", "pending": False}
+                         "title": "Sample A", "pending": False, "values": None,
+                         "out_of_range": None}
+
+
+def test_a_panel_event_counts_its_values_and_the_approved_ones_out_of_range(demo, get):
+    panels = [e for e in get()["events"] if e["kind"] == "panel"]
+    pending, latest = panels[0], panels[1]
+    # under review: its size, and none of its unreviewed values counted as out of range
+    assert pending["pending"] is True and pending["values"] == 2 and pending["out_of_range"] == 0
+    # two months ago: LDL and total cholesterol high, glucose, HDL, HbA1c, creatinine in range
+    assert latest["pending"] is False and latest["values"] == 6 and latest["out_of_range"] == 2
 
 
 # ---- a read-only API ------------------------------------------------------------------------------
@@ -388,3 +403,18 @@ def test_an_unreachable_database_is_a_503_that_says_so(monkeypatch):
 def test_nothing_in_the_answer_reassures(demo, get):
     assert not re.search(r"everything is normal|all normal|all good|no problems",
                          str(get()).lower())
+
+
+def test_an_approved_limit_value_stays_in_the_critical_section(conn, user_id, get):
+    """Approving ">5" potassium is no critical check: it stays at the top of the page."""
+    from datetime import date
+
+    from core.services import approve_staged, stage_panel
+
+    staged = stage_panel(conn, user_id, date(2026, 11, 1),
+                         [{"raw_name": "Potassium", "value": ">5", "unit": "mmol/L",
+                           "ref_min": 3.5, "ref_max": 5.1}], alerter=lambda *a: None)
+    approve_staged(conn, user_id, staged["source_id"])
+    rows = get()["attention"]["critical"]
+    assert [(r["code"], r["comparator"], r["pending"], r["unverifiable"], r["limit"])
+            for r in rows] == [("potassium", ">", False, True, True)]

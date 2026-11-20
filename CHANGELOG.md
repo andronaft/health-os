@@ -6,6 +6,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ## [Unreleased]
 
+### Added
+- `get_open_results` (MCP tool): lab markers whose latest approved value is out of range and
+  that nothing approved has measured since, oldest first, with since when they have been out of
+  range in a row and whether a newer value waits for review (its number is not shown).
+  `prepare_doctor_visit` gains the same list as `still_out_of_range`: its `recent_abnormal`
+  also lists values re-measured in range since. The Overview's out-of-range table says the same
+  in a Note column ("Out of range 3 times in a row, since 2025-05-27").
+- Browser UI: print styles (always the light palette, no navigation or controls, tables in
+  full; charts are repainted light for the print), a loading placeholder for pages that take
+  more than 200 ms, and no animation under `prefers-reduced-motion`.
+
 ### Changed
 - Critical-value messages in tool output and alerts are in English by default, with Ukrainian
   and Spanish available through `HEALTH_OS_LANG` (`en` / `uk` / `es`). They were Ukrainian
@@ -20,6 +31,69 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   `observation_types.name_uk` need to use the new tables (#52).
 
 ### Fixed
+- `approve_staged` dated an approval only once no unmapped row was left in the panel, so values
+  approved today counted from the day they were staged and could miss the weekly report.
+- A lab panel whose values were all deleted (a mistaken staging) stayed on the timeline, in the
+  Overview's events and as the summary's "last lab panel". Migration 0015 keeps a panel on
+  `health_timeline` only while one of its values is not deleted.
+- Browser UI: an approved value whose critical check is impossible (a limit like ">5"
+  potassium, or a unit that wasn't converted) is shown in the Critical values block at the top
+  of the Overview, like the health summary shows it: approving it was not a check.
+- Browser UI: "high" and "critical" were the same red; red is now for critical only and high is
+  a burnt orange. Form controls' edges reach 3:1 contrast (they were about 1.4:1). The range on
+  a marker's chart has a solid edge at its limits. On a phone, a wide table keeps its first
+  column in view while scrolling sideways.
+- **Critical findings in narrative reports were never checked.** The classifier for
+  "BI-RADS 5", "suspicion of malignancy", "aneurysm", "cito" existed but nothing called it, so
+  a document stored with `upsert_document` / `add_chunks` sent no alert. Both now scan the text
+  they store and alert through the same channel as a critical lab value (one alert per call).
+  The new `ingestion.narratives.ingest_narrative` stores a document with its chunks and returns
+  the hits (`narrative_flags`, `critical`, and a note sending the user to a doctor).
+- The narrative classifier missed common report phrasings: "BI-RADS category 4", "BI-RADS IV",
+  "BI-RADS 4C", "PI-RADS v2.1 score 5", "ACR TI-RADS TR5", "Lung-RADS 4B", "Bosniak IV". It now
+  reads the words between the scale and the grade (category / score / v2.1 / categoría /
+  категорія), Roman numerals, sub-letters and ranges ("BI-RADS 3–4"); BI-RADS 6, Lung-RADS and
+  Bosniak III–IV are new. Benign grades (BI-RADS 1–3, TR1–TR3, PI-RADS 1–3, Lung-RADS 1–3,
+  Bosniak I–IIF) and follow-up intervals ("BI-RADS 3, control a 6 meses") stay quiet. The word
+  "suspicious" (es "sospechoso", uk "підозрілий", ru "подозрительный") now flags, except in
+  plain negations such as "no suspicious findings" or "sin hallazgos sospechosos"; negation is
+  applied to that word only, so "no findings suspicious for malignancy" still flags.
+- **Apple Health import ignored each record's unit.** A US-locale export's 180 lb was stored as
+  180 kg body weight and a 103.1 °F fever as 103.1 °C. Values are now converted from the unit on
+  the record (lb, st, g → kg; degF, K → °C); records with a unit the importer doesn't know, or
+  none, are skipped and listed in the result's `skipped_unknown_unit` instead of being stored.
+  Samples and daily values already imported are not corrected by importing the export again.
+- Browser UI: the small charts stretched any change over their full height, so the demo's weight
+  going from 68.35 to 68.4 kg was drawn as a steep climb. The Overview tiles and the Labs
+  sparklines now span at least 5% of the values.
+- Browser UI: leaving a marker's Labs page before it finished loading could replace the next
+  page's heading with that marker's name.
+- **Critical values printed as a limit were never checked.** A value like ">600" (a glucose
+  meter's HI) or "<10" (platelets) was stored as text, so it skipped both the critical check
+  and the "critical check impossible" flag, sent no alert, and the summary listed it as an
+  ordinary pending value. A limit is now a number with its comparator: it is critical when
+  everything past it is critical, and "only a limit on the form — critical check impossible"
+  when a critical value may lie past it (">5" potassium). Its status is set only when the
+  limit decides it. Limits stay out of trends and the personal baseline. Text results
+  ("negative") are unchanged. Values already stored as text are not re-read.
+- The weekly report said `"stable": true` while a critical or uncheckable value was waiting for
+  review. It now lists them in `alarming_pending` and is never stable with one. Its window
+  also counts a value from when it was approved, not when it was staged: a panel staged 12
+  days ago and approved today was in no weekly report.
+- One malformed row in `stage_panel` (no `raw_name`, or not an object) crashed the whole panel,
+  critical rows included, in the duplicate check that runs before the row loop.
+- `map_pending_observation` saved a learned synonym as typed, but lookups compare the name
+  without accents, so a name like "Glucosa (método enzimático)" never mapped again even though
+  the tool said it was saved. New ones are saved in the compared form; learned synonyms
+  already stored with accents still need re-saving.
+- Nutrition averages divided each nutrient by the days it appeared, not by the days logged: one
+  meal with vitamin D in a week read as 75% of the daily RDA instead of 11%, hiding a
+  deficiency. The food↔wellbeing glycemic index average also weighed meals by their number of
+  nutrient rows.
+- `query_observations` returned weekly min/avg/max buckets for any window over 90 days, which
+  is the default (365). A year of a lab marker came back without status, unit, range or text
+  results. It now returns every value, with comparator, text and the form's range. Only more
+  than 200 values are bucketed, and the buckets count out-of-range and critical values.
 - Crisis keyword detection missed everyday phrasing: Spanish had only the `suicid` stem
   ("quiero morir", "no quiero vivir más", "me quiero matar" went undetected), German and Polish
   had nothing, and Russian "не хочу жить" and English "I don't want to live" slipped through.
@@ -42,6 +116,73 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   aórtica* and more now flag, with or without accents. Also added in every language: lymphoma,
   leukaemia, melanoma and aortic dissection. Negation stays unhandled on purpose (documented);
   only "índice de masa corporal", bone/muscle/ventricular mass are excluded (#30).
+- **`recompute_canonical` filled in canonical values without the critical check.** A pending
+  potassium 6.9 stored before its unit could be converted was flagged "critical check
+  impossible"; once recompute filled in its value, the flag was gone and the value read as
+  ordinary. Recompute now runs the critical thresholds on every value it fills in: a hit gets
+  status `critical`, an alert on `--apply`, and a line in the script's output. An approved row
+  that turns out critical goes back to pending review, with the reason in its notes, so the
+  health summary and the weekly report show it as a critical value; approving its source again
+  acknowledges it.
+- **"G/L" (giga per litre, 10^9/L) was read as grams per litre.** Platelets 25 G/L, as French,
+  Swiss, German and Spanish forms print them, were stored unmapped with no critical flag and no
+  alert. "G/L" and "T/L" (10^12/L) are now recognised by their capital letter; for a marker
+  measured in g/L (haemoglobin), "G/L" still reads as grams. A critical-watch marker whose unit
+  can't belong to it (potassium in %) is now flagged "critical check impossible" and alerted, and
+  the flag is kept on the row, so the summary and the weekly report keep it alarming until it is
+  mapped.
+- **Approving a value printed as a limit removed every warning.** Approving a ">5" potassium
+  (range 3.5–5.1) moved it out of the pending queue, and with it out of the summary and the
+  weekly report, which then said `"stable": true`. Approved values the critical check couldn't
+  settle (a limit, or no canonical value) are now returned by `approve_staged_source` in
+  `unverifiable_approved` with a warning, listed in the weekly report (which is not stable with
+  one) and in a short section of the health summary. Pending and approved rows use one
+  definition of "uncheckable".
+- `approve_staged_source` returned `approved_observations: 0` as if it had worked when the
+  source was already approved or was never staged; it now returns an error. A source with only
+  unmapped rows pending also returns an error, listing them.
+- `list_pending_reviews` showed a value printed as ">5" as a plain 5.0: the pending view had no
+  comparator. Migration 0016 adds `comparator` and `notes` to `v_observations_pending`.
+- **`check_medication_safety` dropped recorded paracetamol when products were passed in.**
+  Paracetamol 1 g × 4 on the medication list plus Frenadol 650 mg × 3 passed in came out as
+  1950 mg/day "ok" instead of 5950 mg "exceeded". Recorded paracetamol is now always counted;
+  a product passed under the same name replaces only that entry, and the result lists which
+  recorded entries were added (`from_current_medications`).
+- Paracetamol on the medication list was found only by a few generic spellings, so brands
+  (Gelocatil, Panadol, Efferalgan, Dafalgan, Termalgin, Tylenol, Apiretal, Frenadol, Calpol,
+  Xumadol, Perfalgan) and "Acetaminofén" got no daily-total check at all. Names are now matched
+  anywhere in the name ("Парацетамолу таблетки", "Paracetamolratiopharm"), without accents, and
+  by ATC code (N02BE01 / N02BE51 / N02BE71).
+- `check_medication_safety`: `planned_tests` were case-sensitive — "TSH" gave no biotin warning.
+- MCP tools no longer fail with a raw database error (and the SQL) on bad input: a non-UUID id,
+  an impossible date ("2026-02-30"), a string longer than its column or a constraint violation
+  now comes back as `{"error", "detail"}`. `map_pending_observation` and
+  `approve_staged_source` check the id up front; `log_meal`, `log_from_template`,
+  `record_medication`, `record_diagnosis` and `set_profile` check their dates up front.
+- `set_profile` stored `sex` as typed, and "Male" silently dropped the male-only screenings.
+  It is stored as male/female (any case; m/f, чоловіча/жіноча, hombre/mujer accepted),
+  anything else is refused, and so is a date of birth in the future. The screening calendar
+  also reads profiles saved before this case-insensitively.
+- `record_diagnosis` refuses an empty name, a date in the future and statuses outside
+  clinical_status active / recurrence / relapse / inactive / remission / resolved and
+  verification_status confirmed / provisional / suspected / differential / refuted ("Confirmed"
+  is stored as "confirmed"). `record_allergy` refuses a blank allergen and a severity longer
+  than its 20-character column.
+- Food diary: `log_meal` / `update_meal` refuse a time more than a day ahead, negative or
+  non-numeric nutrient amounts, a glycemic index outside 0–100 and a negative glycemic load;
+  `log_from_template` refuses a portion_factor ≤ 0. Nutrition analytics ignore meals dated more
+  than a day ahead — one dated next year used to count in every window until then.
+- `log_from_template` crashed on a template with a null or text nutrient amount; those are now
+  left out and listed in `skipped`. `save_meal_template` refuses unknown nutrient codes ("protien"
+  was saved and then dropped from every meal logged from it) and impossible amounts.
+- `stage_lab_panel` with no rows created an empty panel, reported it as staged and showed it on
+  the timeline; it is now refused before anything is written.
+- `search` returned document chunks of every user in the database, and `crisis_resources` showed
+  whichever profile's emergency contact came first; both are now limited to the current user.
+- `list_pending_reviews` capped the queue at 200 rows in no particular order, so the newest
+  values could be the ones left out, silently. It now returns `{"rows", "truncated"}`, newest
+  first. The other lists have a fixed order too (medications and habits by start date,
+  diagnoses by date, allergies by name).
 
 ### Added
 - Browser UI skeleton (preview): `make ui` / `python -m web` starts a read-only web server on
@@ -78,6 +219,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   still under review flagged. It says "N of M recorded markers in range" and what the rest are,
   never a global verdict. New read-only `GET /api/v1/overview`. It reads the same rows as
   `get_health_summary` (`core.health_summary.read_facts`) in one read-only snapshot (#54).
+- Browser UI Labs page (preview). The marker table lists every lab marker's latest approved
+  value with its status, the range on its form, a sparkline of the last 12 values, how many
+  values there are since when, and how many wait for review; filters for "out of range only"
+  and specimen, plus the text filter. Each marker has its own page: a chart in the marker's
+  canonical unit where every value sits over the range printed on its own form (ranges differ
+  between labs; a range in another unit is converted like the value, or left out if it can't
+  be), pending values drawn hollow, grey and labelled "unverified", the trend (Mann-Kendall
+  p, Theil–Sen slope per year, the same numbers as `get_trend`), an optional personal baseline
+  (mean ± 2σ, at least 5 approved values), text results on their own axis, and a table of every
+  value with the form's value, unit and range. A panel matrix shows markers × the latest 12
+  days with a lab value, coloured by status. Pending values count in no table, matrix, trend
+  or baseline. New read-only `GET /api/v1/labs` and `GET /api/v1/labs/{code}`; `get_trend` now
+  also returns `p` (#55).
+- Browser UI: on the Overview, a lab panel in Recent events says how many values it has and how
+  many approved ones are out of range ("6 values, 2 out of range") instead of a blank, and links
+  to the Labs page; a panel under review gives only its size. The names in "Latest values out
+  of range" link to their Labs pages. Menu items for pages not built yet say "soon".
 
 ## [0.3.0] — 2026-10-15
 

@@ -30,6 +30,23 @@ STALE_WATCH = [
 ]
 STALE_MONTHS = 12
 
+# A critical-watch value the threshold check can't settle: its unit wasn't converted, or the form
+# gives only a limit (">5" potassium may be 7). One definition for the pending queue, approval,
+# the weekly report and this summary — over `observations o`.
+UNVERIFIABLE_SQL = """(o.status IS DISTINCT FROM 'critical' AND o.value_numeric IS NOT NULL
+                       AND (o.value_canonical IS NULL OR o.comparator IS NOT NULL)
+                       AND EXISTS (SELECT 1 FROM critical_thresholds ct
+                                   WHERE ct.type_id = o.type_id))"""
+# a value stored unmapped although its name reads as a critical-watch marker (its unit didn't fit):
+# there is no type to check it by, so ingest_observation writes this mark into its notes
+CHECK_IMPOSSIBLE_MARK = "CRITICAL CHECK IMPOSSIBLE"
+CHECK_IMPOSSIBLE_UNMAPPED_SQL = (f"(o.type_id IS NULL AND o.value_numeric IS NOT NULL "
+                                 f"AND o.notes LIKE '%{CHECK_IMPOSSIBLE_MARK}%')")
+UNVERIFIABLE_WHY = {
+    "limit": "only a limit on the form — critical check impossible, compare with the form",
+    "unit": "unit not converted — critical check impossible, compare with the form",
+}
+
 
 @dataclass
 class SummaryResult:
@@ -44,6 +61,37 @@ def _age(dob: date) -> int:
     return t.year - dob.year - ((t.month, t.day) < (dob.month, dob.day))
 
 
+def read_unverifiable_approved(conn, user_id: str, *, source_id: str | None = None,
+                               days: int | None = None) -> list[dict]:
+    """Approved critical-watch values the threshold check couldn't settle (UNVERIFIABLE_SQL).
+
+    Approval moves a ">5" potassium out of the pending queue, and with it out of every alarming
+    list — yet the value may still be 7. These rows stay listed instead. `source_id` narrows to
+    one staging (approve_staged), `days` to values approved in the last N days (weekly report:
+    when the user approved it, or when it was stored if it never went through review).
+    """
+    rows = conn.execute(
+        text(
+            f"""SELECT o.id, ot.code, o.value_numeric, o.comparator, o.unit, o.effective_at,
+                       (o.comparator IS NOT NULL) AS limit_only
+                FROM observations o
+                JOIN observation_types ot ON ot.id = o.type_id
+                LEFT JOIN ingestion_sources s ON s.id = o.source_id
+                WHERE o.user_id=:u AND o.review_status='approved' AND o.deleted_at IS NULL
+                  AND {UNVERIFIABLE_SQL}
+                  AND (CAST(:sid AS uuid) IS NULL OR o.source_id = CAST(:sid AS uuid))
+                  AND (CAST(:d AS int) IS NULL OR COALESCE(s.reviewed_at, o.created_at)
+                                                  >= now() - make_interval(days => CAST(:d AS int)))
+                ORDER BY o.effective_at DESC"""
+        ),
+        {"u": user_id, "sid": source_id, "d": days},
+    ).mappings().all()
+    return [{"observation_id": str(r["id"]), "code": r["code"],
+             "value": float(r["value_numeric"]), "comparator": r["comparator"],
+             "unit": r["unit"], "effective_at": r["effective_at"],
+             "why": UNVERIFIABLE_WHY["limit" if r["limit_only"] else "unit"]} for r in rows]
+
+
 def read_facts(conn, user_id: str) -> dict:
     """What the summary says, as data. The browser's overview reads these same rows, so the two
     can't disagree."""
@@ -54,17 +102,17 @@ def read_facts(conn, user_id: str) -> dict:
     ).mappings().first()
     pending = conn.execute(
         text(
-            """SELECT ot.code, o.raw_name, o.value_numeric, o.comparator, o.value_text, o.unit,
+            f"""SELECT ot.code, o.raw_name, o.value_numeric, o.comparator, o.value_text, o.unit,
                       o.effective_at, o.status, (o.type_id IS NULL) AS unmapped,
-                      (o.value_canonical IS NULL AND o.value_numeric IS NOT NULL
-                       AND EXISTS (SELECT 1 FROM critical_thresholds ct
-                                   WHERE ct.type_id = o.type_id)) AS unverifiable
+                      ({UNVERIFIABLE_SQL} OR {CHECK_IMPOSSIBLE_UNMAPPED_SQL}) AS unverifiable,
+                      (o.comparator IS NOT NULL) AS limit_only
                FROM observations o LEFT JOIN observation_types ot ON ot.id = o.type_id
                WHERE o.user_id=:u AND o.review_status='pending' AND o.deleted_at IS NULL
                ORDER BY o.effective_at DESC"""
         ),
         {"u": user_id},
     ).mappings().all()
+    unverifiable_approved = read_unverifiable_approved(conn, user_id)
     allergies = conn.execute(
         text(
             """SELECT allergen, reaction, severity, verified FROM allergies
@@ -96,8 +144,12 @@ def read_facts(conn, user_id: str) -> dict:
         ),
         {"u": user_id},
     ).mappings().all()
+    # a panel whose values were all deleted (a mistaken staging) is no lab visit
     last_panel = conn.execute(
-        text("SELECT max(panel_date) FROM panels WHERE user_id=:u"), {"u": user_id}
+        text("""SELECT max(p.panel_date) FROM panels p
+                WHERE p.user_id=:u AND EXISTS (SELECT 1 FROM observations o
+                                              WHERE o.panel_id = p.id AND o.deleted_at IS NULL)"""),
+        {"u": user_id},
     ).scalar()
     stale: list[dict] = []
     for code, label in STALE_WATCH:
@@ -120,6 +172,7 @@ def read_facts(conn, user_id: str) -> dict:
         "profile": prof,
         "age": _age(prof["date_of_birth"]) if prof and prof["date_of_birth"] else None,
         "pending": pending,
+        "unverifiable_approved": unverifiable_approved,
         "allergies": allergies,
         "diagnoses": diags,
         "medications": meds,
@@ -153,15 +206,22 @@ def build(conn, user_id: str) -> SummaryResult:
     # --- pending review: critical values first (never let "no abnormalities" hide them) ---
     pending = facts["pending"]
     alarming = [p for p in pending if is_alarming(p)]
-    unmapped = [p for p in pending if p["unmapped"]]
+    unmapped = [p for p in pending if p["unmapped"] and not is_alarming(p)]
     if pending:
         lines.append(f"## ⚠️ Awaiting review ({len(pending)} values, not yet facts)")
         for p in alarming:
-            what = ("**CRITICAL value** — contact a doctor today, even if it may be a "
-                    "recognition error" if p["status"] == "critical" else
-                    "**unit not recognized — critical check impossible**, compare with the form now")
-            lines.append(f"- {p['code']} {p['value_numeric']:g} {p['unit'] or ''} "
-                         f"({p['effective_at']:%Y-%m-%d}): {what}")
+            if p["status"] == "critical":
+                what = ("**CRITICAL value** — contact a doctor today, even if it may be a "
+                        "recognition error")
+            elif p["limit_only"]:
+                what = ("**only a limit on the form — critical check impossible**, compare "
+                        "with the form now")
+            else:
+                what = ("**unit not recognized — critical check impossible**, compare with the "
+                        "form now")
+            name = p["code"] or f"“{p['raw_name']}”"  # unmapped: the wording on the form
+            lines.append(f"- {name} {p['comparator'] or ''}{p['value_numeric']:g} "
+                         f"{p['unit'] or ''} ({p['effective_at']:%Y-%m-%d}): {what}")
         if unmapped:
             # an unrecognized marker can't be checked against critical thresholds at all
             shown = ", ".join(
@@ -175,6 +235,17 @@ def build(conn, user_id: str) -> SummaryResult:
         rest = len(pending) - len(alarming) - len(unmapped)
         if rest > 0:
             lines.append(f"- {rest} other value(s) — see list_pending_reviews")
+        lines.append("")
+
+    # --- approved, yet the critical check never settled them: approval is not a check ---
+    unverifiable = facts["unverifiable_approved"]
+    if unverifiable:
+        lines.append(f"## ⚠️ Approved, critical check impossible ({len(unverifiable)})")
+        for u in unverifiable[:8]:
+            lines.append(f"- {u['code']} {u['comparator'] or ''}{u['value']:g} {u['unit'] or ''} "
+                         f"({u['effective_at']:%Y-%m-%d}): {u['why']}")
+        if len(unverifiable) > 8:
+            lines.append(f"- … and {len(unverifiable) - 8} more")
         lines.append("")
 
     # --- allergies (including unverified!) ---
