@@ -926,3 +926,22 @@ tbody tr:last-child td {
     text-decoration: none;
   }
 }
+
+/* the review queue (#58): one section per staging, every row pending */
+.review p {
+  margin: 0 0 0.5rem;
+}
+
+.review-source {
+  margin-top: 1.5rem;
+}
+
+.review-source code {
+  overflow-wrap: anywhere;
+}
+
+.review-alarming {
+  border-inline-start: 4px solid var(--critical);
+  padding-inline-start: 0.5rem;
+  font-weight: 600;
+}

@@ -7,6 +7,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 ## [Unreleased]
 
 ### Added
+- Browser UI: the Review queue page (#58) lists every value awaiting review, grouped by the
+  staging it came in (panel date, lab, document, when and how it was staged, and its id for
+  `approve_staged_source`). Values that can't wait (critical, or a critical check that is
+  impossible) come first, then the ones whose marker wasn't recognized; each row has the value as
+  printed, the range on its form, the name on the form when it was matched to a differently named
+  marker, and the same notes as the Overview. Every row is drawn as pending. The page is
+  read-only: approving and mapping stay with the MCP client, on your explicit instruction. New
+  endpoint `GET /api/v1/review`; it lists the same rows `get_health_summary` counts as awaiting
+  review.
 - `get_open_results` (MCP tool): lab markers whose latest approved value is out of range and
   that nothing approved has measured since, oldest first, with since when they have been out of
   range in a row and whether a newer value waits for review (its number is not shown).

@@ -19,6 +19,7 @@ import {
   qualitative, qualitativeOption, sparkPoints, specimenOptions, specimenWord, tableRows, tn, trendLines,
   unconverted,
 } from "../web/static/pages/labs-model.js";
+import { printedAs, sourceMeta, sourceTitle } from "../web/static/pages/review-model.js";
 import { t } from "../web/static/strings.js";
 
 test("the stored statuses have their own word; 'normal' is shown as 'in range'", () => {
@@ -435,4 +436,44 @@ test("an out-of-range row says how long it has been out of range and if a newer 
   assert.equal(outNote({ streak: 1, since: "2026-01-01", newer_pending: false }), "");
   assert.equal(outNote({ streak: 1, since: "2026-01-01", newer_pending: true }), "A newer value is under review");
   assert.equal(outNote({ streak: null, since: null, newer_pending: false }), ""); // a vital: no run
+});
+
+// ---- Review queue (#58) -----------------------------------------------------------------------
+
+const staging = (extra = {}) => ({
+  source_id: "00000000-0000-0000-0000-000000000001",
+  channel: "mcp",
+  staged_at: "2026-11-18T10:00:00+00:00",
+  panel_date: "2026-11-17",
+  panel_type: null,
+  facility: "Demo Lab",
+  document: null,
+  total: 3,
+  unmapped: 0,
+  alarming: 0,
+  ...extra,
+});
+
+test("a staging is named by its panel, its lab and its document", () => {
+  assert.equal(sourceTitle(staging()), "Lab panel, 2026-11-17 · Demo Lab");
+  assert.equal(sourceTitle(staging({ panel_type: "Lipids", document: "scan.pdf" })), "Lipids, 2026-11-17 · Demo Lab · scan.pdf");
+  assert.equal(sourceTitle(staging({ panel_date: null, facility: null })), "Staged on 2026-11-18");
+});
+
+test("a staging says how many values, how many unrecognized and how many cannot wait", () => {
+  assert.equal(sourceMeta(staging()), "3 values · staged 2026-11-18 via mcp");
+  assert.equal(sourceMeta(staging({ total: 1, unmapped: 1, alarming: 1, channel: null })),
+    "1 value · 1 not recognized · 1 cannot wait · staged 2026-11-18");
+});
+
+test("the printed name shows only when the marker it was matched to is named otherwise", () => {
+  assert.equal(printedAs({ raw_name: "Калій", name: "Potassium", unmapped: false }), "on the form: “Калій”");
+  assert.equal(printedAs({ raw_name: "potassium ", name: "Potassium", unmapped: false }), "");
+  assert.equal(printedAs({ raw_name: "Mystery", name: "Mystery", unmapped: true }), "");
+  assert.equal(printedAs({ raw_name: null, name: "Potassium", unmapped: false }), "");
+});
+
+test("the review page loads", () => {
+  assert.ok(PAGES.find((page) => page.id === "review").load);
+  assert.equal(parseRoute("#/review").page.id, "review");
 });
