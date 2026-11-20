@@ -3,7 +3,7 @@
   "name": "io.github.andronaft/health-os",
   "title": "health-os",
   "description": "Local-first personal health record: labs, meds, wearables, food log, deterministic safety checks",
-  "version": "0.2.1",
+  "version": "0.4.0",
   "websiteUrl": "https://github.com/andronaft/health-os",
   "repository": {
     "url": "https://github.com/andronaft/health-os",
@@ -12,7 +12,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/andronaft/health-os:0.2.1",
+      "identifier": "ghcr.io/andronaft/health-os:0.4.0",
       "transport": {
         "type": "stdio"
       },
