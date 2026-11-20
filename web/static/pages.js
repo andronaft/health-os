@@ -10,7 +10,7 @@ export const PAGES = [
   { id: "medications", title: "nav.medications" },
   { id: "diagnoses", title: "nav.diagnoses" },
   { id: "habits", title: "nav.habits" },
-  { id: "review", title: "nav.review" },
+  { id: "review", title: "nav.review", load: () => import("./pages/review.js") },
   { id: "report", title: "nav.report" },
 ];
 

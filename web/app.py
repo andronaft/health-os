@@ -31,6 +31,7 @@ from starlette.staticfiles import StaticFiles
 from core.db import engine
 from web.labs import lab_index, lab_marker
 from web.overview import overview as read_overview
+from web.review import review_queue
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "web" / "static"
@@ -164,6 +165,10 @@ def lab(request):
     return _read(request, lambda conn, lang: lab_marker(conn, request.path_params["code"], lang))
 
 
+def review(request):
+    return _read(request, review_queue)
+
+
 def create_app(token: str) -> Starlette:
     if not token:
         raise ValueError("a session token is required")
@@ -173,6 +178,7 @@ def create_app(token: str) -> Starlette:
         Route("/api/v1/overview", overview, methods=["GET"]),
         Route("/api/v1/labs", labs, methods=["GET"]),
         Route("/api/v1/labs/{code}", lab, methods=["GET"]),
+        Route("/api/v1/review", review, methods=["GET"]),
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]
     return Starlette(routes=routes, middleware=[
