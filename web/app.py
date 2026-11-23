@@ -29,6 +29,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from core.db import engine
+from web.food import food_page
 from web.labs import lab_index, lab_marker
 from web.overview import overview as read_overview
 from web.review import review_queue
@@ -169,6 +170,11 @@ def review(request):
     return _read(request, review_queue)
 
 
+def food(request):
+    return _read(request, lambda conn, lang: food_page(conn, lang,
+                                                      request.query_params.get("days")))
+
+
 def create_app(token: str) -> Starlette:
     if not token:
         raise ValueError("a session token is required")
@@ -179,6 +185,7 @@ def create_app(token: str) -> Starlette:
         Route("/api/v1/labs", labs, methods=["GET"]),
         Route("/api/v1/labs/{code}", lab, methods=["GET"]),
         Route("/api/v1/review", review, methods=["GET"]),
+        Route("/api/v1/food", food, methods=["GET"]),
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]
     return Starlette(routes=routes, middleware=[

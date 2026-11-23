@@ -6,6 +6,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ## [Unreleased]
 
+### Added
+- Browser UI: the Food page (preview), for the last 7, 30 or 90 days of the food diary. It says
+  on how many of those days meals were logged, and that the amounts are estimates when they are.
+  Tiles give the average per logged day of energy, protein, carbohydrates, fat, fibre, sugar and
+  sodium against the catalog's norm or limit; the nutrients below 70% of the norm or over the safe
+  upper limit are listed worst first. Two charts by day: energy with the norm as a dashed line, and
+  sodium and potassium with sodium's limit; a day with nothing logged stays a gap. A table of
+  every nutrient in the catalog, where one with no amount logged says "not logged" instead of
+  passing for a zero, and a table of the meals with their main nutrients and a note when a main
+  meal's time looks wrong (before 04:00, or outside its usual hours — the check `log_meal`
+  answers with). Wellbeing after meals is shown when it was entered, as an association. The
+  averages and flags are `nutrition_report`'s (`analytics.nutrition.summarize`); meal times are
+  sent as wall-clock times, so the browser can't move a meal into another day. Read-only: meals
+  are logged and fixed through the MCP client. New read-only `GET /api/v1/food?days=N`.
+
 ## [0.4.0] — 2026-11-20
 
 ### Added

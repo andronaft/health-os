@@ -6,6 +6,7 @@ export const PAGES = [
   { id: "overview", title: "nav.overview", load: () => import("./pages/overview.js") },
   { id: "labs", title: "nav.labs", load: () => import("./pages/labs.js") },
   { id: "vitals", title: "nav.vitals" },
+  { id: "food", title: "nav.food", load: () => import("./pages/food.js") },
   { id: "timeline", title: "nav.timeline" },
   { id: "medications", title: "nav.medications" },
   { id: "diagnoses", title: "nav.diagnoses" },
