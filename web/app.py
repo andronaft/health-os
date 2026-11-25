@@ -32,6 +32,7 @@ from core.db import engine
 from web.labs import lab_index, lab_marker
 from web.overview import overview as read_overview
 from web.review import review_queue
+from web.vitals import vitals as read_vitals
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "web" / "static"
@@ -169,6 +170,11 @@ def review(request):
     return _read(request, review_queue)
 
 
+def vitals(request):
+    days = request.query_params.get("days")
+    return _read(request, lambda conn, lang: read_vitals(conn, lang, days))
+
+
 def create_app(token: str) -> Starlette:
     if not token:
         raise ValueError("a session token is required")
@@ -179,6 +185,7 @@ def create_app(token: str) -> Starlette:
         Route("/api/v1/labs", labs, methods=["GET"]),
         Route("/api/v1/labs/{code}", lab, methods=["GET"]),
         Route("/api/v1/review", review, methods=["GET"]),
+        Route("/api/v1/vitals", vitals, methods=["GET"]),
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]
     return Starlette(routes=routes, middleware=[
