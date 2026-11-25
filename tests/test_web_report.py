@@ -67,9 +67,11 @@ def test_the_demo_patient_in_spanish(conn, get):
     assert data["profile"]["sex"] == "female" and data["profile"]["blood_type"] == "A"
     assert data["allergies"] == [{"allergen": "penicillin", "reaction": "rash",
                                   "severity": "moderate", "verified": True}]
-    assert [m["name"] for m in data["medications"]] == ["Vitamin D3"]
-    [diagnosis] = data["diagnoses"]
-    assert diagnosis["verification_status"] == "suspected" and diagnosis["icd10"] == "E78.0"
+    # current medications only, newest first: the finished iron course is not listed
+    assert [m["name"] for m in data["medications"]] == ["Vitamin D3", "Paracetamol", "Cetirizine"]
+    diagnoses = {d["icd10"]: d for d in data["diagnoses"]}
+    assert set(diagnoses) == {"E78.0", "G44.2", "D50.9", "J30.1"}  # the refuted E03.9 is never sent
+    assert diagnoses["E78.0"]["verification_status"] == "suspected"
     # marker names in the report's language, not the UI's
     out = {r["code"]: r for r in data["out_of_range"]["rows"]}
     assert out["ldl"]["name"] == "Colesterol LDL"
