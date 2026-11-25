@@ -31,6 +31,8 @@ from starlette.staticfiles import StaticFiles
 from core.db import engine
 from web.labs import lab_index, lab_marker
 from web.overview import overview as read_overview
+from web.report import parse_since
+from web.report import report as read_report
 from web.review import review_queue
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -169,6 +171,16 @@ def review(request):
     return _read(request, review_queue)
 
 
+def report(request):
+    """The doctor-visit report (#60), in the report's language; ?since=YYYY-MM-DD for "what
+    changed" (default: the last visit on record, else six months)."""
+    try:
+        since = parse_since(request.query_params.get("since"))
+    except ValueError:
+        return JSONResponse({"error": "since must be a date, YYYY-MM-DD"}, status_code=400)
+    return _read(request, lambda conn, lang: read_report(conn, lang, since))
+
+
 def create_app(token: str) -> Starlette:
     if not token:
         raise ValueError("a session token is required")
@@ -179,6 +191,7 @@ def create_app(token: str) -> Starlette:
         Route("/api/v1/labs", labs, methods=["GET"]),
         Route("/api/v1/labs/{code}", lab, methods=["GET"]),
         Route("/api/v1/review", review, methods=["GET"]),
+        Route("/api/v1/report", report, methods=["GET"]),
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]
     return Starlette(routes=routes, middleware=[

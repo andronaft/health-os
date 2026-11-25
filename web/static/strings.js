@@ -273,6 +273,14 @@ const EN = {
   "review.printed_as": "on the form: “{name}”",
   "review.col.notes": "Notes",
 
+  // the doctor-visit report's controls (#60); the report itself has its own words, in its own
+  // language: pages/report-strings.js
+  "report.language": "Report language",
+  "report.since": "What changed since",
+  "report.since_reset": "Back to the default date",
+  "report.print": "Print or save as PDF",
+  "report.note": "The report below is printed in its own language, for the doctor; these controls are not printed. Your questions stay in this browser and are never sent anywhere.",
+
   "overview.events.title": "Recent events",
   "overview.event.panel": "{n} values",
   "overview.event.panel_out": "{n} values, {out} out of range",
