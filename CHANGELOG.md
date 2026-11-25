@@ -6,6 +6,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ## [Unreleased]
 
+### Added
+- Browser UI: the medical-record pages (#57). **Timeline**: the whole record on one axis, in
+  lanes (diagnoses; visits, procedures and hospital stays; lab panels; vaccinations; documents),
+  with medications and habits drawn as bars from start to stop (to today while ongoing). A
+  "life in years" strip from birth zooms to any year's months; zoom and pan by button, key
+  (+ − ← → Home) or drag; each mark is focusable and opens its details, a lab panel with links to
+  its markers in Labs. A panel with values under review is hollow and says how many; a refuted
+  diagnosis is hollow and struck through. The same record is a sortable table under the chart.
+  **Medications**: allergies first, boxed; what is taken now and before, with dose, route, dates,
+  how long, what for and why it stopped, and the recorded paracetamol per day (a sum of recorded
+  doses, never a safety verdict). **Diagnoses**: grouped by certainty (confirmed / provisional /
+  suspected / refuted) with ICD-10 code and clinical status; an active one with nothing recorded
+  for two years carries a neutral hint to review it with a doctor. **Habits**: each with its
+  amount and how long it has run or how long ago it stopped, and a strip over the years. New
+  endpoints `GET /api/v1/timeline`, `/medications`, `/diagnoses`, `/habits`.
+- The demo patient has the rest of a medical record: diagnoses of every certainty, a finished
+  medication course, an as-needed paracetamol, habits, doctor visits, a hospital stay with its
+  procedure and discharge summary, and vaccinations — every timeline lane has something.
+
 ## [0.4.0] — 2026-11-20
 
 ### Added
