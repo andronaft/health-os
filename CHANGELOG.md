@@ -6,6 +6,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ## [Unreleased]
 
+### Added
+- Browser UI: the Vitals page (#56). Home blood pressure is checked against the ESH home
+  monitoring protocol (Parati et al., J Hypertens 2021;39:1742–1767): each run of reading days is
+  a diary; the latest one says how many days had 2 morning and 2 evening readings and whether the
+  protocol was followed, and only then shows the mean of its readings without the first day
+  (overall, morning, evening). Earlier diaries are listed; the chart draws morning and evening
+  apart, shades the diaries and marks the ESH home threshold of 135/85 mmHg with its source. The
+  watch's daily values (sleep and its stages, sleep score, HRV, resting heart rate, stress, Body
+  Battery, steps, training load as 7- and 28-day means of intensity minutes, VO₂max) share one
+  time axis, zoom and pointer; a year of steps, sleep score and stress is drawn as calendar
+  heatmaps. A 7-day to 5-year window switch; points are aggregated in the database per day, week
+  (1 year) or month (5 years). New endpoint `GET /api/v1/vitals?days=`. Measures without values
+  are left out; blood pressure awaiting review is counted, not drawn.
+- `steps` marker (LOINC 41950-7, a daily total). Run `python -m seed.load` once to add it to an
+  existing database.
+- The demo patient has three home blood pressure diaries (two followed, one not) and a year of
+  daily watch values.
+
 ## [0.4.0] — 2026-11-20
 
 ### Added
