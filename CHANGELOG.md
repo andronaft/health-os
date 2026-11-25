@@ -7,6 +7,63 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 ## [Unreleased]
 
 ### Added
+- Browser UI: the medical-record pages (#57). **Timeline**: the whole record on one axis, in
+  lanes (diagnoses; visits, procedures and hospital stays; lab panels; vaccinations; documents),
+  with medications and habits drawn as bars from start to stop (to today while ongoing). A
+  "life in years" strip from birth zooms to any year's months; zoom and pan by button, key
+  (+ − ← → Home) or drag; each mark is focusable and opens its details, a lab panel with links to
+  its markers in Labs. A panel with values under review is hollow and says how many; a refuted
+  diagnosis is hollow and struck through. The same record is a sortable table under the chart.
+  **Medications**: allergies first, boxed; what is taken now and before, with dose, route, dates,
+  how long, what for and why it stopped, and the recorded paracetamol per day (a sum of recorded
+  doses, never a safety verdict). **Diagnoses**: grouped by certainty (confirmed / provisional /
+  suspected / refuted) with ICD-10 code and clinical status; an active one whose entry is unchanged
+  for two years carries a neutral hint to review it with a doctor. **Habits**: each with its
+  amount and how long it has run or how long ago it stopped, and a strip over the years. New
+  endpoints `GET /api/v1/timeline`, `/medications`, `/diagnoses`, `/habits`.
+- The demo patient has the rest of a medical record: diagnoses of every certainty, a finished
+  medication course, an as-needed paracetamol, habits, doctor visits, a hospital stay with its
+  procedure and discharge summary, and vaccinations — every timeline lane has something.
+- Browser UI: the doctor-visit report (#60), one A4 page (two at most) to print or save as PDF
+  with the browser's own print. Its language is chosen apart from the UI's (English, Ukrainian,
+  Spanish: headings, marker names, units, dates and decimal commas). It has the profile, the
+  allergies in a box of their own, current medications, diagnoses by status (confirmed, in
+  question, past), the lab markers whose latest value is out of range (the same rows as
+  `prepare_doctor_visit`'s `still_out_of_range`), up to four trend mini-charts, and "what changed
+  since" a date (default: the last visit on record, else six months): new lab results against the
+  one before, values that moved into or out of range, medications started or stopped, diagnoses
+  recorded. A change between two results is called larger than lab noise only for LDL, total
+  cholesterol and glucose, from the reference change value with the cited EFLM within-subject CV
+  (`analytics/rcv.py`). "My questions for the doctor" is kept in the browser only and printed.
+  Every printed page ends with how many approved values the report was made from, that it is not
+  a medical document and that pending values are not included. New endpoint
+  `GET /api/v1/report?lang=…&since=YYYY-MM-DD`.
+
+### Added
+- Browser UI: the Vitals page (#56). Home blood pressure is checked against the ESH home
+  monitoring protocol (Parati et al., J Hypertens 2021;39:1742–1767): each run of reading days is
+  a diary; the latest one says how many days had 2 morning and 2 evening readings and whether the
+  protocol was followed, and only then shows the mean of its readings without the first day
+  (overall, morning, evening). Earlier diaries are listed; the chart draws morning and evening
+  apart, shades the diaries and marks the ESH home threshold of 135/85 mmHg with its source. The
+  watch's daily values (sleep and its stages, sleep score, HRV, resting heart rate, stress, Body
+  Battery, steps, training load as 7- and 28-day means of intensity minutes, VO₂max) share one
+  time axis, zoom and pointer; a year of steps, sleep score and stress is drawn as calendar
+  heatmaps. A 7-day to 5-year window switch; points are aggregated in the database per day, week
+  (1 year) or month (5 years). New endpoint `GET /api/v1/vitals?days=&tz=`: days, "today" and
+  morning/evening are read in the browser's time zone (`tz`, an IANA name; 400 for an unknown
+  one). Measures without values are left out; blood pressure awaiting review is counted, not
+  drawn. A reading is a systolic and a diastolic of one group, or recorded at the same moment
+  (two readings logged at one minute stay two); only complete pairs count. Values entered per
+  day (no time of day) are shown as such: the protocol's sessions can't be checked from them, so
+  the diary says so and gives a plain mean, labelled as not a protocol check.
+- Migration 0017: `v_observations` gains `time_precision` (appended; grants unchanged).
+- `steps` marker (LOINC 41950-7, a daily total). Run `python -m seed.load` once to add it to an
+  existing database.
+- The demo patient has three home blood pressure diaries (two followed, one not) and a year of
+  daily watch values.
+
+### Added
 - Browser UI: the Food page (preview), for the last 7, 30 or 90 days of the food diary. It says
   on how many of those days meals were logged, and that the amounts are estimates when they are.
   Tiles give the average per logged day of energy, protein, carbohydrates, fat, fibre, sugar and

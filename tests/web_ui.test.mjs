@@ -21,6 +21,17 @@ import {
 } from "../web/static/pages/labs-model.js";
 import { printedAs, sourceMeta, sourceTitle } from "../web/static/pages/review-model.js";
 import {
+  bpKey, bpOption, diaryState, diaryView, heatmapOption, heatmapSummary, panelTitle, pressure, quartiles, readoutAt as vitalsReadout,
+  seriesName, wearableOption, wearablePanels, windowLinks, withGaps,
+} from "../web/static/pages/vitals-model.js";
+import {
+  allergyDetail, changeShort, changeText, diagnosisDetail, footerText, groupDiagnoses, loadQuestions,
+  medicationDetail, methodText, miniChart, outLead, percentText, profileLine as reportProfile, reportDate, reportRange,
+  reportUnit, reportValue, resultChange, saveQuestions, streakText, trendSpan, QUESTIONS_KEY,
+  changesNote, noOtherChanges, stoppedMedications, truncatedText,
+} from "../web/static/pages/report-model.js";
+import { DICTIONARIES, REPORT_LANGS, translator } from "../web/static/pages/report-strings.js";
+import {
   amount, amountText, coverageText, dailyValues, energyOption, flagStatus, flagged, mealNote, mealTypeWord,
   normText, pctText, routeDays, sodiumOption, sourceText, timeOf, windowDates,
 } from "../web/static/pages/food-model.js";
@@ -480,6 +491,651 @@ test("the printed name shows only when the marker it was matched to is named oth
 test("the review page loads", () => {
   assert.ok(PAGES.find((page) => page.id === "review").load);
   assert.equal(parseRoute("#/review").page.id, "review");
+});
+
+// ---- the medical-record pages (#57): timeline, medications, diagnoses, habits -------------------
+import {
+  allergyLine, clinicalTag, diagnosisDates, doseText, durationText, habitAmount, habitBar, habitStreak, medicationPeriod,
+  isActive, medicationTags, paracetamolLines, reviewCount, reviewHint, sortDiagnoses, stopText, verificationTitle,
+} from "../web/static/pages/record-model.js";
+import {
+  eventDetails as timelineDetails, eventLabel, fromDay, fullRange, isPendingEvent, isRefuted, isUncertain, isUndatedEnd,
+  lanesOf, packRows, panRange, periodEnd,
+  panelLinks, periodDates, periodLabel, tableRows as timelineRows, ticks, toDay, yearCells, yearRange, zoomRange,
+} from "../web/static/pages/timeline-model.js";
+
+const record = {
+  today: "2026-11-25",
+  born: "1985-04-12",
+  undated_habits: 0,
+  events: [
+    { kind: "diagnosis", lane: "diagnoses", id: "d1", date: "2017-11-25", title: "Sample rhinitis", icd10: "J30.1", verification: "confirmed", clinical: "active" },
+    { kind: "diagnosis", lane: "diagnoses", id: "d2", date: "2024-05-26", title: "Sample refuted", icd10: null, verification: "refuted", clinical: "inactive" },
+    { kind: "panel", lane: "labs", id: "p1", date: "2026-08-20", title: null, facility: "Demo Lab", values: 6, pending: 0, out_of_range: 2, markers: [{ code: "ldl", name: "LDL cholesterol" }] },
+    { kind: "panel", lane: "labs", id: "p2", date: "2026-11-22", title: null, facility: "Demo Lab", values: 2, pending: 2, out_of_range: 0, markers: [] },
+    { kind: "vaccination", lane: "vaccinations", id: "v1", date: "2010-11-25", title: "Sample vaccine", disease: "Sample", dose_number: 3, facility: null },
+  ],
+  periods: [
+    { kind: "medication", lane: "medications", id: "m1", title: "Sample iron", start: "2022-11-25", end: "2023-05-27", ongoing: false, status: "stopped", detail: "200 mg × 1/day, oral", stop_reason: "course completed" },
+    { kind: "medication", lane: "medications", id: "m2", title: "Sample antihistamine", start: "2017-11-25", end: null, ongoing: true, status: "taking", detail: null, stop_reason: null },
+    { kind: "medication", lane: "medications", id: "m3", title: "Sample analgesic", start: "2025-05-26", end: null, ongoing: true, status: "taking", detail: null, stop_reason: null },
+    { kind: "habit", lane: "habits", id: "h1", title: "smoking", start: "2004-11-24", end: "2014-11-25", ongoing: false, status: "former", detail: null },
+  ],
+};
+
+test("timeline days are whole UTC days, whatever the time part says", () => {
+  assert.equal(toDay("1970-01-02"), 1);
+  assert.equal(toDay("2026-11-01T23:30:00+00:00"), toDay("2026-11-01"));
+  assert.equal(fromDay(toDay("2026-11-25")), "2026-11-25");
+});
+
+test("medication bars that overlap go one above the other; one after another share a row", () => {
+  const rows = packRows(record.periods.filter((p) => p.lane === "medications"), toDay(record.today));
+  // the antihistamine runs to today, so the iron course and the analgesic can't share its row,
+  // but the analgesic starts after the iron course ended: they share the second one
+  assert.deepEqual(rows.map((row) => row.map((p) => p.id)), [["m2"], ["m1", "m3"]]);
+});
+
+test("only lanes with something in them are drawn, in a fixed order, and a hidden one is left out", () => {
+  assert.deepEqual(lanesOf(record).map((lane) => lane.id), ["diagnoses", "labs", "vaccinations", "medications", "habits"]);
+  assert.deepEqual(lanesOf(record, new Set(["labs"])).map((lane) => lane.id), ["diagnoses", "vaccinations", "medications", "habits"]);
+});
+
+test("the whole record runs from the first record to just past today; zoom and pan stay inside it", () => {
+  const bounds = fullRange(record);
+  assert.ok(bounds.from < toDay("2004-11-24") && bounds.to > toDay(record.today));
+  assert.ok(bounds.to - toDay(record.today) < 120); // a little room for today's mark, not months of future
+  const zoomed = zoomRange(bounds, 0.5, bounds);
+  assert.ok(Math.abs((zoomed.to - zoomed.from) - (bounds.to - bounds.from) / 2) <= 1);
+  assert.deepEqual(zoomRange(zoomed, 4, bounds), bounds); // zooming out never goes past the record
+  const tiny = zoomRange(bounds, 0.0001, bounds);
+  assert.ok(tiny.to - tiny.from >= 31); // no closer than about a month
+  assert.equal(panRange(bounds, -0.5, bounds).from, bounds.from);
+  const late = panRange(zoomed, 10, bounds);
+  assert.equal(late.to, bounds.to);
+  assert.equal(late.to - late.from, zoomed.to - zoomed.from);
+});
+
+test("a wide range is ticked by year, a narrow one by month with the year on January", () => {
+  const years = ticks({ from: toDay("2004-06-01"), to: toDay("2026-12-01") }, 800);
+  assert.ok(years.every((tick) => /^\d{4}$/.test(tick.label)));
+  assert.ok(years.length >= 4 && years.length <= 12);
+  const months = ticks(yearRange(2026), 1600);
+  assert.deepEqual(months.map((tick) => tick.label).slice(0, 3), ["2026", "Feb", "Mar"]);
+  assert.ok(months.every((tick) => tick.day >= toDay("2025-12-18")));
+  assert.ok(ticks(yearRange(2026), 300).length < months.length); // fewer on a phone
+});
+
+test("life in years runs from birth to this year, shaded by how much was recorded", () => {
+  const cells = yearCells(record);
+  assert.equal(cells[0].year, 1985);
+  assert.equal(cells[0].age, 0);
+  assert.equal(cells.at(-1).year, 2026);
+  assert.equal(cells.find((c) => c.year === 1990).level, 0);
+  assert.ok(cells.find((c) => c.year === 2026).level > 0);
+  assert.equal(cells.find((c) => c.year === 2026).n, 2); // two panels
+  assert.ok(cells.find((c) => c.year === 2020).ongoing); // the antihistamine runs through it
+  assert.equal(cells.find((c) => c.year === 1995).ongoing, false);
+  // no birth date: it starts at the first record
+  assert.equal(yearCells({ ...record, born: null })[0].year, 2004);
+});
+
+test("a panel under review is drawn as pending, and links only to markers with an approved value", () => {
+  const [, , done, pending] = record.events;
+  assert.equal(isPendingEvent(done), false);
+  assert.equal(isPendingEvent(pending), true);
+  assert.match(eventLabel(pending), /^Lab panel, 2026-11-22: Demo Lab · 2 values · 2 awaiting review$/);
+  assert.deepEqual(timelineDetails(done), ["Demo Lab", "6 values", "2 out of range"]);
+  assert.deepEqual(panelLinks(done), [{ code: "ldl", name: "LDL cholesterol", href: "#/labs/ldl" }]);
+  assert.deepEqual(panelLinks(pending), []);
+});
+
+test("a refuted diagnosis is marked so, and a diagnosis says its code and status", () => {
+  assert.equal(isRefuted(record.events[1]), true);
+  assert.equal(isRefuted(record.events[0]), false);
+  assert.deepEqual(timelineDetails(record.events[0]), ["J30.1", "confirmed", "active"]);
+});
+
+test("a period says from when to when, and why a medication stopped", () => {
+  const [iron, antihistamine] = record.periods;
+  assert.equal(periodDates(antihistamine), "2017-11-25 → today");
+  assert.equal(periodLabel(iron), "Medication: Sample iron, 2022-11-25 → 2023-05-27 · 200 mg × 1/day, oral · stopped: course completed");
+  assert.equal(periodLabel(record.periods[3]), "Habit: smoking, 2004-11-24 → 2014-11-25 · former");
+});
+
+test("the timeline's table has every event and period, oldest first", () => {
+  const rows = timelineRows(record);
+  assert.equal(rows.length, record.events.length + record.periods.length);
+  assert.equal(rows[0].date, "2004-11-24");
+  assert.equal(rows.find((row) => row.title === "Sample antihistamine").end, "today");
+  assert.equal(rows.filter((row) => row.pending).length, 1);
+});
+
+test("durations round down and never claim more than there was", () => {
+  assert.equal(durationText(1), "1 day");
+  assert.equal(durationText(45), "45 days");
+  assert.equal(durationText(183), "6 months");
+  assert.equal(durationText(toDay("2026-11-25") - toDay("2017-11-25")), "9 years");
+  assert.equal(durationText(729), "23 months");
+  assert.equal(durationText(null), "");
+});
+
+const iron = {
+  name: "Sample iron", product_type: "prescription", dose_amount: 200, dose_unit: "mg", route: "oral", times_per_day: 1,
+  dosing_pattern: null, start_date: "2022-11-25", end_date: "2023-05-27", status: "stopped", stop_reason: "course completed", days: 183,
+};
+
+test("a medication shows only what was recorded about it", () => {
+  assert.equal(doseText(iron), "200 mg × 1/day");
+  assert.equal(doseText({ dose_amount: null, dose_unit: "mg", times_per_day: 2 }), "2/day");
+  assert.equal(doseText({ dose_amount: null, dose_unit: null, times_per_day: null }), "");
+  assert.equal(medicationPeriod(iron), "2022-11-25 → 2023-05-27 · 6 months");
+  assert.equal(medicationPeriod({ start_date: "2017-11-25", end_date: null, status: "taking", days: 3287 }), "since 2017-11-25 · 9 years");
+  assert.deepEqual(medicationTags(iron), ["oral"]);
+  assert.deepEqual(medicationTags({ product_type: "otc", route: null, dosing_pattern: "as_needed" }), ["over the counter", "as needed"]);
+  assert.deepEqual(medicationTags({ product_type: "new_kind", route: "nasal_spray" }), ["new kind", "nasal spray"]);
+});
+
+test("why a medication stopped is said, and a missing reason is not guessed", () => {
+  assert.equal(stopText(iron), "course completed");
+  assert.equal(stopText({ ...iron, stop_reason: null }), "no reason recorded");
+  assert.equal(stopText({ ...iron, status: "paused", stop_reason: null }), "paused: no reason recorded");
+  assert.equal(stopText({ ...iron, status: "taking" }), "");
+});
+
+test("recorded paracetamol is a sum, never reassurance; a missing dose is named, not counted as 0", () => {
+  assert.deepEqual(paracetamolLines(null), []);
+  const one = paracetamolLines({ products: ["Paracetamol"], mg_per_day: 1000, missing_dose: [], limit_mg: 4000, over_limit: false });
+  assert.match(one[0], /^1000 mg a day, as recorded/);
+  assert.equal(one.length, 2);
+  for (const line of one) assert.doesNotMatch(line.toLowerCase(), /within|safe to|normal|fine/);
+  const gap = paracetamolLines({ products: ["A", "B"], mg_per_day: 1000, missing_dose: ["B"], limit_mg: 4000, over_limit: false });
+  assert.match(gap.join(" "), /Not counted.*: B\./);
+  const none = paracetamolLines({ products: ["B"], mg_per_day: null, missing_dose: ["B"], limit_mg: 4000, over_limit: false });
+  assert.doesNotMatch(none[0], /mg a day/);
+  const over = paracetamolLines({ products: ["A", "B"], mg_per_day: 5000, missing_dose: [], limit_mg: 4000, over_limit: true });
+  assert.match(over[0], /5000 mg a day across 2 products/);
+  assert.match(over.join(" "), /above 4000 mg.*doctor or pharmacist/);
+});
+
+test("an allergy reads with its reaction and severity", () => {
+  assert.equal(allergyLine({ allergen: "sample", reaction: "rash", severity: "moderate" }), "sample — rash · moderate");
+  assert.equal(allergyLine({ allergen: "sample", reaction: null, severity: null }), "sample");
+});
+
+test("diagnoses: active first, dates by status, and the review hint is an observation, not advice", () => {
+  const rows = [
+    { name: "old resolved", clinical_status: "resolved", diagnosed_at: "2025-01-01", resolved_at: "2025-06-01" },
+    { name: "active old", clinical_status: "active", diagnosed_at: "2017-11-25", resolved_at: null, review_hint: true },
+    { name: "active new", clinical_status: "active", diagnosed_at: "2026-10-26", resolved_at: null },
+  ];
+  assert.deepEqual(sortDiagnoses(rows).map((d) => d.name), ["active new", "active old", "old resolved"]);
+  assert.equal(diagnosisDates(rows[0]), "2025-01-01 → 2025-06-01");
+  assert.equal(diagnosisDates(rows[1]), "since 2017-11-25");
+  assert.equal(diagnosisDates({ clinical_status: "inactive", diagnosed_at: "2024-05-26" }), "recorded 2024-05-26");
+  const hint = reviewHint(rows[1], "2026-11-25");
+  assert.match(hint, /this entry hasn't changed since 2017-11-25 \(9 years\)/);
+  assert.match(hint, /reviewing with a doctor/);
+  assert.equal(reviewHint(rows[2], "2026-11-25"), "");
+  assert.equal(reviewCount([{ rows }, { rows: [] }]), 1);
+  assert.equal(verificationTitle("suspected"), "Suspected");
+  assert.equal(verificationTitle("something_new"), "something new");
+});
+
+test("a habit says how long it has run, or how long ago it stopped", () => {
+  const running = { status: "current", start_date: "2023-11-25", end_date: null, days: 1096 };
+  assert.equal(habitStreak(running), "For 3 years, since 2023-11-25");
+  const smoking = { status: "former", start_date: "2004-11-24", end_date: "2014-11-25", days: 3653, days_since_end: 4383 };
+  assert.equal(habitStreak(smoking), "Stopped 12 years ago, on 2014-11-25, after 10 years");
+  assert.equal(habitStreak({ status: "former", start_date: null, end_date: null }), "Former; no end date recorded");
+  assert.equal(habitStreak({ status: "current", start_date: null }), "Current; no start date recorded");
+  assert.equal(habitAmount({ cigarettes_per_day: 8, smoking_years: 10 }), "8 cigarettes a day · 10 years of smoking");
+  assert.equal(habitAmount({ frequency: "2–3 drinks a week", drinks_per_week: 3 }), "2–3 drinks a week");
+  assert.equal(habitAmount({ drinks_per_week: 1 }), "1 drink a week");
+  const bar = habitBar(smoking, toDay("1985-04-12"), toDay("2026-11-25"));
+  assert.ok(bar.left > 0.4 && bar.left < 0.5 && bar.width > 0.2 && bar.width < 0.3);
+  assert.equal(habitBar({ start_date: null }, 0, 1), null);
+});
+
+test("every count the record pages put in words has its singular", () => {
+  for (const key of ["timeline.year.events", "timeline.panel.values", "timeline.panel.out", "timeline.panel.pending",
+    "timeline.panel.pending_note", "timeline.undated_habits", "record.duration.days", "record.duration.months",
+    "record.duration.years", "record.paracetamol.total", "record.diagnoses.review_summary", "record.habit.cigarettes",
+    "record.habit.drinks", "record.habit.smoking_years"]) {
+    assert.notEqual(t(`${key}_one`), `${key}_one`, key);
+  }
+});
+
+test("the record pages load", () => {
+  for (const id of ["timeline", "medications", "diagnoses", "habits"]) {
+    assert.ok(PAGES.find((page) => page.id === id).load, id);
+    assert.equal(parseRoute(`#/${id}`).page.id, id);
+  }
+});
+
+test("a diagnosis that is not confirmed is drawn uncertain on the timeline; an unknown value is never a raw key", () => {
+  const dx = (verification) => ({ kind: "diagnosis", verification, clinical: "active", icd10: null });
+  assert.equal(isUncertain(dx("confirmed")), false);
+  assert.equal(isUncertain(dx("refuted")), false);
+  for (const v of ["suspected", "provisional", "differential", null, "something_new"]) assert.equal(isUncertain(dx(v)), true, v);
+  assert.deepEqual(timelineDetails(dx("something_new")), ["something new", "active"]);
+  assert.deepEqual(timelineDetails(dx(null)), ["certainty not recorded", "active"]);
+  // refuted but left "active": not active anywhere
+  assert.deepEqual(timelineDetails(dx("refuted")), ["refuted"]);
+});
+
+test("a period that is over but has no end date never runs to today", () => {
+  const today = toDay("2026-11-25");
+  const undated = { kind: "habit", lane: "habits", id: "h9", title: "smoking", start: "2004-11-24", end: null, ongoing: false, status: "former" };
+  const stopped = { kind: "medication", lane: "medications", id: "m9", title: "Sample", start: "2020-01-01", end: null, ongoing: false, status: "stopped" };
+  assert.equal(periodEnd(undated, today), null);
+  assert.equal(periodEnd({ ...undated, ongoing: true }, today), today);
+  assert.equal(isUndatedEnd(undated), true);
+  assert.equal(periodDates(undated), "2004-11-24 → end not recorded");
+  assert.match(periodLabel(stopped), /2020-01-01 → end not recorded · stopped$/);
+  // it covers only its start day, so a later period can share its row
+  const later = { ...stopped, id: "m10", start: "2021-01-01", end: "2021-06-01" };
+  assert.equal(packRows([stopped, later], today).length, 1);
+  const rows = timelineRows({ events: [], periods: [undated] });
+  assert.equal(rows[0].end, "end not recorded");
+  const cells = yearCells({ today: "2026-11-25", born: null, events: [], periods: [undated] });
+  assert.equal(cells.find((c) => c.year === 2004).ongoing, true);
+  assert.equal(cells.find((c) => c.year === 2010).ongoing, false);
+  const bar = habitBar({ status: "former", start_date: "2004-11-24", end_date: null }, toDay("2000-01-01"), today);
+  assert.equal(bar.undated, true);
+  assert.ok(bar.width < 0.01);
+  assert.equal(habitBar({ status: "current", start_date: "2004-11-24", end_date: null }, toDay("2000-01-01"), today).undated, false);
+  assert.equal(medicationPeriod({ start_date: "2020-01-01", end_date: null, status: "stopped", days: null }), "2020-01-01 → end not recorded");
+});
+
+test("a refuted diagnosis is never active, whatever clinical status it was left with", () => {
+  const refuted = { name: "r", clinical_status: "active", verification_status: "refuted", diagnosed_at: "2026-01-01", resolved_at: null };
+  const active = { name: "a", clinical_status: "active", verification_status: "confirmed", diagnosed_at: "2020-01-01", resolved_at: null };
+  assert.equal(isActive(refuted), false);
+  assert.equal(clinicalTag(refuted), "");
+  assert.equal(clinicalTag(active), "active");
+  assert.equal(diagnosisDates(refuted), "recorded 2026-01-01");
+  assert.deepEqual(sortDiagnoses([refuted, active]).map((d) => d.name), ["a", "r"]);
+});
+
+test("the timeline reaches a record dated after today", () => {
+  const bounds = fullRange({ ...record, events: [...record.events, { kind: "visit", lane: "care", id: "f1", date: "2027-03-01", title: "planned" }] });
+  assert.ok(bounds.to > toDay("2027-03-01"));
+});
+
+// ---- Doctor-visit report (#60) ----------------------------------------------------------------
+
+const en = translator("en");
+const uk = translator("uk");
+const es = translator("es");
+
+test("every report dictionary has every English word, every plural form its language needs", () => {
+  const plain = Object.keys(DICTIONARIES.en).filter((key) => !/_(one|other)$/.test(key));
+  const plurals = [...new Set(Object.keys(DICTIONARIES.en).filter((key) => /_other$/.test(key)).map((key) => key.replace(/_other$/, "")))];
+  for (const lang of REPORT_LANGS) {
+    const dict = DICTIONARIES[lang];
+    for (const key of plain) assert.ok(dict[key], `${lang}: ${key}`);
+    const forms = new Intl.PluralRules(lang).resolvedOptions().pluralCategories.filter((form) => form !== "many" || lang !== "es");
+    for (const key of plurals) for (const form of forms) assert.ok(dict[`${key}_${form}`], `${lang}: ${key}_${form}`);
+  }
+  assert.equal(translator("fr").lang, "en"); // an unknown language is English, never blank
+});
+
+test("the report's words never reassure", () => {
+  for (const lang of REPORT_LANGS) {
+    for (const text of Object.values(DICTIONARIES[lang])) {
+      assert.doesNotMatch(text.toLowerCase(), /everything is normal|all normal|todo normal|все в нормі|no problems/);
+    }
+  }
+  assert.equal(outLead({ lab_markers_seen: 9, rows: [] }, en),
+    "Among the 9 lab markers on record, none has its latest value outside the range printed on the form.");
+  assert.match(outLead({ lab_markers_seen: 9, rows: [{}] }, es), /^De los 9 parámetros/);
+  assert.match(outLead({ lab_markers_seen: 3, rows: [{}] }, uk), /^Серед 3 лабораторних показників/);
+});
+
+test("dates, numbers and units in the report's language", () => {
+  assert.equal(reportDate("2026-09-26T00:00:00+00:00", en), "26 Sept 2026");
+  assert.equal(reportDate("2026-09-26", es), "26 sept 2026");
+  assert.equal(reportDate(null, es), "");
+  assert.equal(reportValue({ value: 5.8, unit: "mmol/L" }, es), "5,8 mmol/L");
+  assert.equal(reportValue({ value: 5.8, unit: "mmol/L" }, uk), "5,8 ммоль/л");
+  assert.equal(reportValue({ value: 75, unit: "umol/L" }, en), "75 µmol/L");
+  assert.equal(reportValue({ value: 5, comparator: "<", unit: "mg/L" }, uk), "<5 мг/л");
+  assert.equal(reportValue({ value: null, text: "negativo" }, es), "negativo");
+  assert.equal(reportUnit("IU", es), "UI");
+  assert.equal(reportUnit("mmHg", uk), "мм рт. ст.");
+  assert.equal(reportUnit("x10^9/L", en), "x10^9/L"); // what it doesn't know stays as printed
+  assert.equal(reportRange({ ref_min: 0, ref_max: 5.2 }, es), "0–5,2");
+  assert.equal(reportRange({ ref_min: 1.2, ref_max: null }, en), "≥ 1.2");
+  assert.equal(reportRange({ ref_min: null, ref_max: null }, en), "");
+});
+
+test("the profile line, in the patient's grammatical gender where the language has one", () => {
+  const profile = { sex: "female", age: 41, date_of_birth: "1985-04-12", blood_type: "A", rh_factor: "+", height_cm: 168 };
+  assert.equal(reportProfile(profile, en), "Female, 41 years (born 12 Apr 1985) · blood type A+ · height 168 cm");
+  assert.match(reportProfile(profile, es), /^Mujer, 41 años \(nacida el 12 abr 1985\)/);
+  assert.match(reportProfile({ ...profile, sex: "male" }, es), /nacido el/);
+  assert.match(reportProfile(profile, uk), /народилася/);
+  assert.equal(reportProfile(null, en), "No profile on record.");
+  assert.equal(reportProfile({}, es), "No hay perfil registrado.");
+});
+
+test("allergies and medications: the records as entered, our own words translated", () => {
+  assert.equal(allergyDetail({ reaction: "rash", severity: "moderate", verified: true }, es), "reacción: rash · moderada");
+  assert.equal(allergyDetail({ reaction: null, severity: "Anaphylaxis!", verified: false }, en), "Anaphylaxis! · not verified");
+  const med = { name: "Vitamin D3", dose_amount: 2000, dose_unit: "IU", times_per_day: 1, product_type: "supplement", start_date: "2026-01-29" };
+  assert.equal(medicationDetail(med, en), "2,000 IU, 1× a day · supplement · since 29 Jan 2026");
+  assert.equal(medicationDetail(med, es), "2000 UI, 1× al día · suplemento · desde el 29 ene 2026");
+  assert.equal(medicationDetail({ ...med, end_date: "2026-11-01" }, en, { stopped: true }),
+    "2,000 IU, 1× a day · supplement · 29 Jan 2026 – 1 Nov 2026");
+  assert.equal(medicationDetail({ name: "X", product_type: "unknown-type" }, en), "");
+});
+
+test("diagnoses by status: confirmed, in question, past; a refuted one is left out", () => {
+  const d = (name, clinical, verification) => ({ name, clinical_status: clinical, verification_status: verification, at: "2026-10-26" });
+  const groups = groupDiagnoses([
+    d("A", "active", "confirmed"), d("B", "active", "suspected"), d("C", "resolved", "confirmed"),
+    d("D", "active", "refuted"), d("E", null, null), d("F", "relapse", "provisional"), d("G", "remission", "suspected"),
+  ]);
+  assert.deepEqual(groups.confirmed.map((x) => x.name), ["A", "E"]);
+  assert.deepEqual(groups.in_question.map((x) => x.name), ["B", "F"]);
+  assert.deepEqual(groups.past.map((x) => x.name), ["C", "G"]);
+  assert.equal(diagnosisDetail({ icd10: "E78.0", clinical_status: "active", verification_status: "suspected", at: "2026-10-26" }, es),
+    "E78.0 · sospecha · desde el 26 oct 2026");
+  assert.equal(diagnosisDetail({ icd10: null, clinical_status: "resolved", verification_status: "confirmed", at: null }, uk), "вилікуваний");
+});
+
+test("a change between two results is called larger than lab noise only when it is", () => {
+  const within = { percent: 8.6, rcv: 22.9, significant: false };
+  const larger = { percent: -26.7, rcv: 22.9, significant: true };
+  assert.equal(percentText(8.6, es), "+8,6 %");
+  assert.equal(percentText(-26.7, en), "−26.7 %");
+  assert.match(changeText(within, en), /^Last change \+8\.6 %: within the reference change value \(22\.9 %\)/);
+  assert.match(changeText(larger, es), /^Último cambio −26,7 %: mayor que/);
+  assert.equal(changeText(null, en), ""); // no cited number: no verdict either way
+  assert.equal(changeShort(within, uk), "остання зміна +8,6 %, RCV 22,9 %");
+  assert.equal(changeShort(null, uk), "");
+  assert.match(methodText({ markers: [{ name: "Colesterol LDL" }, { name: "Glucosa" }] }, es), /Solo para: Colesterol LDL, Glucosa\.$/);
+});
+
+test("a 'what changed' row: before and now, and whether it crossed its range", () => {
+  const row = {
+    name: "LDL", value: 3.4, unit: "mmol/L", status: "high", at: "2026-11-20", moved: "out_of_range",
+    before: { value: 2.8, unit: "mmol/L", status: "normal", at: "2026-08-27" },
+    change: { percent: 21.4, rcv: 22.9, significant: false },
+  };
+  const parts = resultChange(row, en);
+  assert.equal(parts.now, "3.4 mmol/L");
+  assert.equal(parts.status, "high");
+  assert.equal(parts.before, "before: 2.8 mmol/L, 27 Aug 2026");
+  assert.equal(parts.moved, "now out of range");
+  assert.equal(resultChange({ ...row, before: null, moved: null, status: "normal", change: null }, es).before, "primera medición");
+  assert.equal(resultChange({ ...row, before: null, moved: null, status: "normal" }, es).status, "");
+  assert.equal(streakText({ since: "2024-12-05", streak: 4 }, en), "5 Dec 2024 (4 values in a row)");
+  assert.equal(streakText({ since: "2024-12-05", streak: 5 }, uk), "5 груд. 2024 р. (5 значень поспіль)");
+});
+
+test("the footer says what the report is made of, in the report's language", () => {
+  const data = { approved_values: 56, generated_at: "2026-11-25T16:51:37+00:00" };
+  assert.equal(footerText(data, en), "Generated from 56 approved values on 25 Nov 2026. Not a medical document. Pending values are not included.");
+  assert.match(footerText(data, es), /^Generado a partir de 56 valores aprobados el 25 nov 2026\. No es un documento médico\./);
+  assert.match(footerText({ ...data, approved_values: 1 }, en), /^Generated from 1 approved value on/);
+  assert.doesNotMatch(footerText(data, uk), /\.\./);
+});
+
+test("a trend's mini-chart keeps its range band and its points inside the box", () => {
+  const trend = {
+    ref_min: 0, ref_max: 3.0,
+    points: [{ at: "2024-06-08", value: 2.9, status: "normal" }, { at: "2025-06-03", value: 3.3, status: "high" }, { at: "2026-09-26", value: 3.8, status: "high" }],
+  };
+  const chart = miniChart(trend, 200, 56);
+  assert.equal(chart.points.length, 3);
+  for (const p of chart.points) {
+    assert.ok(p.x >= 0 && p.x <= 200 && p.y >= 0 && p.y <= 56);
+  }
+  assert.ok(chart.points[2].y < chart.points[0].y); // higher value, higher on the chart
+  assert.deepEqual(chart.points.map((p) => p.out), [false, true, true]);
+  assert.ok(chart.band && chart.band.y > chart.points[2].y); // the latest value is above the band
+  assert.equal(miniChart({ ...trend, ref_min: null, ref_max: null }, 200, 56).band, null);
+  assert.equal(trendSpan(trend, en), "3 values, 8 Jun 2024 – 26 Sept 2026");
+});
+
+test("the questions stay in this browser, and blocked storage is no error", () => {
+  const store = new Map();
+  const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), removeItem: (k) => store.delete(k) };
+  assert.equal(loadQuestions(storage), "");
+  assert.equal(saveQuestions(storage, "¿Repito el LDL?"), true);
+  assert.equal(store.get(QUESTIONS_KEY), "¿Repito el LDL?");
+  assert.equal(loadQuestions(storage), "¿Repito el LDL?");
+  saveQuestions(storage, "");
+  assert.equal(store.has(QUESTIONS_KEY), false);
+  const blocked = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
+  assert.equal(loadQuestions(blocked), "");
+  assert.equal(saveQuestions(blocked, "x"), false);
+  assert.equal(loadQuestions(null), "");
+});
+
+test("every verification status has its word, 'refuted' included", () => {
+  for (const tr of [en, uk, es]) {
+    for (const status of ["confirmed", "provisional", "suspected", "differential", "refuted"]) {
+      assert.doesNotMatch(tr.t(`verification.${status}`), /^verification\./, `${tr.lang}: ${status}`);
+    }
+  }
+  assert.equal(diagnosisDetail({ icd10: null, clinical_status: "active", verification_status: "refuted", at: null }, es), "descartado");
+});
+
+test("a medication stopped on an unrecorded day is listed with the stopped ones, said so", () => {
+  const meds = { started: [], stopped: [{ name: "A", start_date: "2024-01-01", end_date: "2026-11-01" }], stopped_undated: [{ name: "B", start_date: "2024-01-01", end_date: null }] };
+  assert.deepEqual(stoppedMedications(meds).map((m) => m.name), ["A", "B"]);
+  assert.equal(medicationDetail(meds.stopped_undated[0], en, { stopped: true }), "since 1 Jan 2024 · stopped, date unknown");
+  assert.equal(medicationDetail({ name: "C" }, es, { stopped: true }), "suspendida, fecha desconocida");
+  assert.equal(noOtherChanges({ medications: { started: [], stopped: [], stopped_undated: [{}] }, diagnoses: [] }), false);
+  assert.equal(noOtherChanges({ medications: { started: [], stopped: [] }, diagnoses: [] }), true);
+});
+
+test("the since date says it is included, and a cut list says it is cut", () => {
+  assert.equal(changesNote({ since: "2026-05-27", since_source: "visit" }, en), "the last visit on record · 27 May 2026 itself included.");
+  assert.match(changesNote({ since: "2026-05-27", since_source: "default" }, es), /Incluido el propio 27 may 2026\.$/);
+  assert.equal(truncatedText({ medications: true, diagnoses: false, limit: 200 }, "medications", en), "Only the first 200 are listed; the record has more.");
+  assert.equal(truncatedText({ medications: true, diagnoses: false, limit: 200 }, "diagnoses", en), "");
+  assert.equal(truncatedText(undefined, "diagnoses", en), "");
+});
+
+test("the report page loads", () => {
+  assert.ok(PAGES.find((page) => page.id === "report").load);
+  assert.equal(parseRoute("#/report").page.id, "report");
+});
+
+// ---- Vitals (#56) ---------------------------------------------------------------------------------
+
+const PROTOCOL = {
+  morning: [4, 12], evening: [16, 24], max_days: 7, min_days: 3, readings_per_session: 2,
+  threshold: { systolic: 135, diastolic: 85 }, source: { label: "ESH 2021", url: "https://example.org" },
+};
+const COLORS = {
+  morning: "#1", evening: "#2", muted: "#3", c1: "#a", c2: "#b", c3: "#c", c4: "#d", area: "#e",
+  low: "#f", high: "#g", empty: "#h", bg: "#i",
+};
+const diary = (extra = {}) => ({
+  first_day: "2026-11-19", last_day: "2026-11-25", days: 7, earlier_days: 0, complete_days: 7,
+  counted_days: 6, sessions: 14, full_sessions: 14, other_readings: 0, followed: true,
+  mean: {
+    systolic: 133.5, diastolic: 83.04, n: 24, from_day: "2026-11-20",
+    morning: { systolic: 135.5, diastolic: 85.8, n: 12 }, evening: { systolic: 131.4, diastolic: 80.3, n: 12 },
+  },
+  ...extra,
+});
+
+test("the window switch offers the API's windows and marks the current one", () => {
+  const links = windowLinks({ days: 90, options: [7, 30, 90, 365] });
+  assert.deepEqual(links.map((l) => l.href), ["#/vitals/7", "#/vitals/30", "#/vitals/90", "#/vitals/365"]);
+  assert.deepEqual(links.filter((l) => l.current).map((l) => l.days), [90]);
+  assert.equal(links[3].label, "1 year");
+});
+
+test("blood pressure is shown in whole mmHg", () => {
+  assert.equal(pressure({ systolic: 133.5, diastolic: 83.04 }), "134/83");
+  assert.equal(pressure({ systolic: 133, diastolic: null }), "133/—");
+  assert.equal(pressure(null), "—");
+});
+
+test("a followed diary has a mean; one that wasn't says why there is none", () => {
+  const followed = diaryView(diary(), PROTOCOL);
+  assert.equal(followed.mean, "134/83");
+  assert.equal(followed.verdict, "Protocol followed");
+  assert.match(followed.meanNote, /24 morning and evening readings from 2026-11-20; the first day is left out/);
+  assert.equal(followed.sessions, "Morning 136/86 · evening 131/80 mmHg");
+  const missed = diaryView(diary({
+    followed: false, mean: null, complete_days: 2, counted_days: 1, other_readings: 2, earlier_days: 3,
+  }), PROTOCOL);
+  assert.equal(missed.mean, null);
+  assert.equal(missed.verdict, "Protocol not followed");
+  assert.match(missed.noMean, /needs 3 complete days after the first one, and this diary has 1/);
+  assert.ok(missed.lines.some((line) => line.includes("2 readings taken outside")));
+  assert.ok(missed.lines.some((line) => line.includes("3 earlier days")));
+});
+
+test("a diary whose values have no time of day is not judged, and its mean says what it is", () => {
+  const dated = {
+    first_day: "2026-06-28", last_day: "2026-07-02", days: 5, earlier_days: 0, timing: "unrecorded",
+    followed: null, value_days: 5, untimed_readings: 10, incomplete_readings: 0,
+    mean: { systolic: 136.4, diastolic: 83.6, n: 8, days: 4, from_day: "2026-06-29" },
+  };
+  assert.equal(diaryState(dated), "unrecorded");
+  const view = diaryView(dated, PROTOCOL);
+  assert.equal(view.verdict, "Time of day not recorded");
+  assert.equal(view.icon, "?");
+  assert.equal(view.followed, false);
+  assert.equal(view.mean, "136/84");
+  assert.match(view.meanNote, /Plain mean of 8 values on 4 days from 2026-06-29.*Not a protocol check/);
+  assert.equal(view.sessions, null);
+  assert.match(view.lines[0], /10 values on 5 days, each with a date but no time/);
+  assert.ok(!view.lines.some((line) => line.includes("morning and 2 evening")));
+  assert.equal(diaryView({ ...dated, mean: null }, PROTOCOL).noMean, "No mean: only the first day has values.");
+});
+
+test("incomplete readings and readings without a time in a timed diary are said, not used", () => {
+  const view = diaryView(diary({ incomplete_readings: 2, untimed_readings: 3 }), PROTOCOL);
+  assert.ok(view.lines.includes("2 readings with only a systolic or only a diastolic value are not used"));
+  assert.ok(view.lines.includes("3 readings without a time of day are not used"));
+  assert.equal(diaryState(diary({ followed: false })), "not_followed");
+});
+
+test("a diary that followed the protocol but somehow has no mean shows none", () => {
+  assert.equal(diaryView(diary({ mean: null }), PROTOCOL).mean, null);
+});
+
+test("lines break across gaps instead of bridging them", () => {
+  assert.deepEqual(withGaps([[0, 1], [1, 2], [10, 3]], 5), [[0, 1], [1, 2], [5.5, null], [10, 3]]);
+  assert.deepEqual(withGaps([], 5), []);
+});
+
+const window = { days: 30, from: "2026-10-27", to: "2026-11-25", bucket: "day" };
+const reading = (at, session, systolic, diastolic) => ({ at, session, systolic, diastolic, n: 1 });
+
+test("the BP chart: sessions apart, the threshold labelled, the diaries shaded", () => {
+  const bp = {
+    points: [reading("2026-11-20T07:05:00+00:00", "morning", 136, 86), reading("2026-11-20T21:05:00+00:00", "evening", 130, 80),
+      reading("2026-11-05T14:30:00+00:00", "other", 128, 80), reading("2026-11-10", "untimed", 138, 86)],
+    diaries: [diary(), diary({ first_day: "2026-08-01", last_day: "2026-08-04", followed: false })],
+    protocol: PROTOCOL,
+  };
+  const option = bpOption(bp, window, { colors: COLORS });
+  const names = option.series.map((s) => s.name);
+  assert.ok(names.includes("Morning systolic") && names.includes("Evening diastolic") && names.includes("Other time, systolic"));
+  assert.equal(option.series.find((s) => s.name === "Other time, systolic").type, "scatter");
+  const dated = option.series.find((s) => s.name === "No time of day, systolic");
+  assert.equal(dated.type, "scatter");
+  assert.match(dated.data[0].tip, /^2026-11-10\nTime of day not recorded: 138\/86 mmHg$/);
+  const threshold = option.series.at(-1);
+  assert.deepEqual(threshold.markLine.data.map((d) => d.yAxis), [135, 85]);
+  assert.equal(threshold.markLine.data[0].name, "ESH home threshold 135");
+  assert.equal(threshold.markArea.data.length, 1); // the August diary is outside the window
+  const morning = option.series.find((s) => s.name === "Morning systolic");
+  assert.match(morning.data[0].tip, /Morning: 136\/86 mmHg/);
+  assert.deepEqual(bpKey(bp.points).sessions.map((k) => k.label), ["Morning", "Evening", "Other time of day", "Time of day not recorded"]);
+  assert.deepEqual(bpKey(bp.points.slice(0, 1)).sessions.map((k) => k.session), ["morning"]);
+  // the axis always reaches both threshold lines
+  assert.equal(option.yAxis.min({ min: 120, max: 130 }), 80);
+  assert.equal(option.yAxis.max({ min: 120, max: 130 }), 140);
+});
+
+const day = (at, value) => ({ at, value, n: 1 });
+const wearables = [
+  { code: "sleep_duration", name: "Sleep duration", unit: "h", days: 2, points: [day("2026-11-24", 7.2), day("2026-11-25", 6.8)] },
+  { code: "sleep_deep", name: "Deep sleep", unit: "h", days: 2, points: [day("2026-11-24", 1.2), day("2026-11-25", 1.0)] },
+  { code: "hrv", name: "Heart rate variability", unit: "ms", days: 1, points: [day("2026-11-25", 48)] },
+  { code: "sleep_score", name: "Sleep score", unit: "score", days: 1, points: [day("2026-11-24", 81)] },
+  { code: "steps", name: "Steps", unit: "steps", days: 1, points: [day("2026-11-25", 10234)] },
+];
+
+test("panels appear only for measures with values, in a fixed order", () => {
+  const panels = wearablePanels(wearables, null);
+  assert.deepEqual(panels.map((p) => p.id), ["sleep", "sleep_score", "hrv", "steps"]);
+  assert.deepEqual(panels[0].series.map((s) => [s.name, s.bar]), [["Total", false], ["Deep", true]]);
+  assert.equal(panelTitle(panels[0]), "Sleep (h)");
+  assert.equal(panelTitle(panels[1]), "Sleep score"); // a score is no unit
+  assert.deepEqual(wearablePanels([], null), []);
+  assert.equal(seriesName({ code: "unknown_code", name: "Its own name" }), "Its own name");
+});
+
+test("training load becomes its own panel with two lines", () => {
+  const load = {
+    unit: "min", acute_days: 7, chronic_days: 28,
+    lines: [{ key: "acute", points: [day("2026-11-25", 30)] }, { key: "chronic", points: [] }],
+  };
+  const [panel] = wearablePanels([], load);
+  assert.equal(panel.id, "load");
+  assert.deepEqual(panel.series.map((s) => s.name), ["Acute (7-day mean)"]); // an empty line is left out
+});
+
+test("the synchronized chart: one grid per panel, one shared zoom and pointer", () => {
+  const panels = wearablePanels(wearables, null);
+  const option = wearableOption(panels, window, { colors: COLORS });
+  assert.equal(option.grid.length, 4);
+  assert.deepEqual(option.dataZoom.map((z) => z.xAxisIndex), [[0, 1, 2, 3], [0, 1, 2, 3]]);
+  assert.deepEqual(option.axisPointer.link, [{ xAxisIndex: "all" }]);
+  assert.deepEqual(option.xAxis.map((x) => x.axisLabel.show), [false, false, false, true]);
+  const deep = option.series.find((s) => s.name === "Deep");
+  assert.equal(deep.type, "bar");
+  assert.equal(deep.stack, "stages");
+  assert.equal(option.series.find((s) => s.name === "Steps").type, "bar");
+});
+
+test("the readout spells out every panel's value at the pointer", () => {
+  const panels = wearablePanels(wearables, null);
+  const at = vitalsReadout(panels, Date.parse("2026-11-25"));
+  assert.equal(at.title, "2026-11-25");
+  assert.deepEqual(at.lines, ["Sleep: Total 6.8 h, Deep 1 h", "HRV: 48 ms", "Steps: 10,234 steps"]);
+  assert.equal(vitalsReadout(panels, Date.parse("2026-01-01")).title, "No value at this point");
+  const weekly = vitalsReadout(panels, Date.parse("2026-11-26"), "week");
+  assert.equal(weekly.title, "Week of 2026-11-25");
+});
+
+const heatmap = {
+  code: "steps", name: "Steps", unit: "steps", from: "2025-11-26", to: "2026-11-25",
+  days: [["2026-11-23", 4000], ["2026-11-24", 8000], ["2026-11-25", 12000], ["2026-11-22", 6000]],
+};
+
+test("quartiles and the heatmap's own summary", () => {
+  assert.deepEqual(quartiles([4, 1, 3, 2, 5]), { low: 1, q1: 2, median: 3, q3: 4, high: 5 });
+  assert.equal(quartiles([]), null);
+  assert.equal(heatmapSummary(heatmap), "4 of 365 days have a value; the middle half lies between 6,000 and 8,000 steps");
+  assert.equal(heatmapSummary({ ...heatmap, unit: "score" }), "4 of 365 days have a value; the middle half lies between 6,000 and 8,000");
+});
+
+test("the heatmap is a calendar of the year, coloured from its own lowest to highest day", () => {
+  const option = heatmapOption(heatmap, { colors: COLORS });
+  assert.deepEqual(option.calendar.range, ["2025-11-26", "2026-11-25"]);
+  assert.equal(option.visualMap.min, 4000);
+  assert.equal(option.visualMap.max, 12000);
+  assert.equal(option.series[0].coordinateSystem, "calendar");
+  assert.equal(option.series[0].data.length, 4); // a day without a value is not sent as zero
+});
+
+test("the vitals page loads", () => {
+  assert.ok(PAGES.find((page) => page.id === "vitals").load);
+  assert.deepEqual(parseRoute("#/vitals/365").args, ["365"]);
 });
 
 // ---- Food -------------------------------------------------------------------------------------

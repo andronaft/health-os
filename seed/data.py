@@ -151,6 +151,8 @@ OBSERVATION_TYPES = [
     ("sleep_rem", None, "REM-сон", "REM sleep", "wearable", None, "numeric", "h", None),
     ("intensity_minutes", None, "Хвилини інтенсивності", "Intensity minutes", "wearable", None, "numeric", "min", None),
     ("active_calories", "41981-2", "Активні калорії", "Active calories", "wearable", None, "numeric", "kcal", None),
+    # LOINC 41950-7 "Number of steps in 24 hour Measured": a daily total from a watch or phone
+    ("steps", "41950-7", "Кроки за добу", "Steps", "wearable", None, "numeric", "steps", None),
 ]
 
 # ---- synonyms: code -> [(synonym, lang)] --------------------------------------------

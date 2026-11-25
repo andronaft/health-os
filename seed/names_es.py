@@ -191,6 +191,7 @@ OBSERVATION_NAMES_ES = {
     "sleep_rem": "Sueño REM",
     "intensity_minutes": "Minutos de intensidad",
     "active_calories": "Calorías activas",
+    "steps": "Pasos al día",
 }
 
 NUTRIENT_NAMES_ES = {
