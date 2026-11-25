@@ -37,9 +37,10 @@ export function doseText({ dose_amount: dose, dose_unit: unit, times_per_day: ti
 
 /** "since 2017-11-25 · 9 years" / "2022-11-25 → 2023-05-27 · 6 months" */
 export function medicationPeriod(m) {
-  const dates = m.end_date
-    ? `${formatDate(m.start_date)} → ${formatDate(m.end_date)}`
-    : t("record.since", { date: formatDate(m.start_date) });
+  let dates = t("record.since", { date: formatDate(m.start_date) });
+  if (m.end_date) dates = `${formatDate(m.start_date)} → ${formatDate(m.end_date)}`;
+  // stopped, but when was never recorded: never "since", which would read as still taken
+  else if (m.status !== "taking") dates = `${formatDate(m.start_date)} → ${t("timeline.end_not_recorded")}`;
   return [dates, durationText(m.days)].filter(Boolean).join(" · ");
 }
 
@@ -95,7 +96,11 @@ export const verificationNote = (verification) => {
 };
 
 const ACTIVE = new Set(["active", "recurrence", "relapse"]);
-export const isActive = (d) => ACTIVE.has(d.clinical_status);
+/** Active, and believed: a refuted diagnosis left with the default "active" status is not. */
+export const isActive = (d) => ACTIVE.has(d.clinical_status) && d.verification_status !== "refuted";
+
+/** The clinical-status tag; none for a refuted diagnosis, whatever status it was left with. */
+export const clinicalTag = (d) => (d.verification_status === "refuted" ? "" : word("clinical", d.clinical_status));
 
 /** Active ones first (newest first), then the rest (newest first). */
 export function sortDiagnoses(rows) {
@@ -111,6 +116,8 @@ export function diagnosisDates(d) {
 /** The neutral hint: an observation about the record, never advice about the person. */
 export function reviewHint(d, today) {
   if (!d.review_hint) return "";
+  // what the check measures: the entry's own date, the only date a diagnosis has (none is ever
+  // updated in place) — not whether anything else was recorded about the condition since
   return t("record.diagnosis.review_hint", { duration: durationText(toDay(today) - toDay(d.diagnosed_at)), date: formatDate(d.diagnosed_at) });
 }
 
@@ -148,12 +155,14 @@ export function habitStreak(h) {
 
 /**
  * Where a habit's bar sits on a strip from `from` to `today` (days): { left, width } as shares
- * of 0–1. None without a start date.
+ * of 0–1, and undated: a former habit with no end date, drawn as a stub. None without a start.
  */
 export function habitBar(h, from, today) {
   if (!h.start_date) return null;
   const span = Math.max(1, today - from);
   const start = Math.max(toDay(h.start_date), from);
-  const end = h.end_date ? toDay(h.end_date) : today;
-  return { left: (start - from) / span, width: Math.max(0.005, (end - start) / span) };
+  // only a current habit runs to today; a former one with no end date is a stub at its start
+  const undated = !h.end_date && h.status !== "current";
+  const end = h.end_date ? toDay(h.end_date) : undated ? start : today;
+  return { left: (start - from) / span, width: Math.max(0.005, (end - start) / span), undated };
 }

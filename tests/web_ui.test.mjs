@@ -480,11 +480,12 @@ test("the review page loads", () => {
 
 // ---- the medical-record pages (#57): timeline, medications, diagnoses, habits -------------------
 import {
-  allergyLine, diagnosisDates, doseText, durationText, habitAmount, habitBar, habitStreak, medicationPeriod,
-  medicationTags, paracetamolLines, reviewCount, reviewHint, sortDiagnoses, stopText, verificationTitle,
+  allergyLine, clinicalTag, diagnosisDates, doseText, durationText, habitAmount, habitBar, habitStreak, medicationPeriod,
+  isActive, medicationTags, paracetamolLines, reviewCount, reviewHint, sortDiagnoses, stopText, verificationTitle,
 } from "../web/static/pages/record-model.js";
 import {
-  eventDetails as timelineDetails, eventLabel, fromDay, fullRange, isPendingEvent, isRefuted, lanesOf, packRows, panRange,
+  eventDetails as timelineDetails, eventLabel, fromDay, fullRange, isPendingEvent, isRefuted, isUncertain, isUndatedEnd,
+  lanesOf, packRows, panRange, periodEnd,
   panelLinks, periodDates, periodLabel, tableRows as timelineRows, ticks, toDay, yearCells, yearRange, zoomRange,
 } from "../web/static/pages/timeline-model.js";
 
@@ -614,7 +615,7 @@ test("a medication shows only what was recorded about it", () => {
   assert.equal(doseText({ dose_amount: null, dose_unit: "mg", times_per_day: 2 }), "2/day");
   assert.equal(doseText({ dose_amount: null, dose_unit: null, times_per_day: null }), "");
   assert.equal(medicationPeriod(iron), "2022-11-25 → 2023-05-27 · 6 months");
-  assert.equal(medicationPeriod({ start_date: "2017-11-25", end_date: null, days: 3287 }), "since 2017-11-25 · 9 years");
+  assert.equal(medicationPeriod({ start_date: "2017-11-25", end_date: null, status: "taking", days: 3287 }), "since 2017-11-25 · 9 years");
   assert.deepEqual(medicationTags(iron), ["oral"]);
   assert.deepEqual(medicationTags({ product_type: "otc", route: null, dosing_pattern: "as_needed" }), ["over the counter", "as needed"]);
   assert.deepEqual(medicationTags({ product_type: "new_kind", route: "nasal_spray" }), ["new kind", "nasal spray"]);
@@ -658,7 +659,7 @@ test("diagnoses: active first, dates by status, and the review hint is an observ
   assert.equal(diagnosisDates(rows[1]), "since 2017-11-25");
   assert.equal(diagnosisDates({ clinical_status: "inactive", diagnosed_at: "2024-05-26" }), "recorded 2024-05-26");
   const hint = reviewHint(rows[1], "2026-11-25");
-  assert.match(hint, /nothing recorded about it for 9 years \(since 2017-11-25\)/);
+  assert.match(hint, /this entry hasn't changed since 2017-11-25 \(9 years\)/);
   assert.match(hint, /reviewing with a doctor/);
   assert.equal(reviewHint(rows[2], "2026-11-25"), "");
   assert.equal(reviewCount([{ rows }, { rows: [] }]), 1);
@@ -695,4 +696,54 @@ test("the record pages load", () => {
     assert.ok(PAGES.find((page) => page.id === id).load, id);
     assert.equal(parseRoute(`#/${id}`).page.id, id);
   }
+});
+
+test("a diagnosis that is not confirmed is drawn uncertain on the timeline; an unknown value is never a raw key", () => {
+  const dx = (verification) => ({ kind: "diagnosis", verification, clinical: "active", icd10: null });
+  assert.equal(isUncertain(dx("confirmed")), false);
+  assert.equal(isUncertain(dx("refuted")), false);
+  for (const v of ["suspected", "provisional", "differential", null, "something_new"]) assert.equal(isUncertain(dx(v)), true, v);
+  assert.deepEqual(timelineDetails(dx("something_new")), ["something new", "active"]);
+  assert.deepEqual(timelineDetails(dx(null)), ["certainty not recorded", "active"]);
+  // refuted but left "active": not active anywhere
+  assert.deepEqual(timelineDetails(dx("refuted")), ["refuted"]);
+});
+
+test("a period that is over but has no end date never runs to today", () => {
+  const today = toDay("2026-11-25");
+  const undated = { kind: "habit", lane: "habits", id: "h9", title: "smoking", start: "2004-11-24", end: null, ongoing: false, status: "former" };
+  const stopped = { kind: "medication", lane: "medications", id: "m9", title: "Sample", start: "2020-01-01", end: null, ongoing: false, status: "stopped" };
+  assert.equal(periodEnd(undated, today), null);
+  assert.equal(periodEnd({ ...undated, ongoing: true }, today), today);
+  assert.equal(isUndatedEnd(undated), true);
+  assert.equal(periodDates(undated), "2004-11-24 → end not recorded");
+  assert.match(periodLabel(stopped), /2020-01-01 → end not recorded · stopped$/);
+  // it covers only its start day, so a later period can share its row
+  const later = { ...stopped, id: "m10", start: "2021-01-01", end: "2021-06-01" };
+  assert.equal(packRows([stopped, later], today).length, 1);
+  const rows = timelineRows({ events: [], periods: [undated] });
+  assert.equal(rows[0].end, "end not recorded");
+  const cells = yearCells({ today: "2026-11-25", born: null, events: [], periods: [undated] });
+  assert.equal(cells.find((c) => c.year === 2004).ongoing, true);
+  assert.equal(cells.find((c) => c.year === 2010).ongoing, false);
+  const bar = habitBar({ status: "former", start_date: "2004-11-24", end_date: null }, toDay("2000-01-01"), today);
+  assert.equal(bar.undated, true);
+  assert.ok(bar.width < 0.01);
+  assert.equal(habitBar({ status: "current", start_date: "2004-11-24", end_date: null }, toDay("2000-01-01"), today).undated, false);
+  assert.equal(medicationPeriod({ start_date: "2020-01-01", end_date: null, status: "stopped", days: null }), "2020-01-01 → end not recorded");
+});
+
+test("a refuted diagnosis is never active, whatever clinical status it was left with", () => {
+  const refuted = { name: "r", clinical_status: "active", verification_status: "refuted", diagnosed_at: "2026-01-01", resolved_at: null };
+  const active = { name: "a", clinical_status: "active", verification_status: "confirmed", diagnosed_at: "2020-01-01", resolved_at: null };
+  assert.equal(isActive(refuted), false);
+  assert.equal(clinicalTag(refuted), "");
+  assert.equal(clinicalTag(active), "active");
+  assert.equal(diagnosisDates(refuted), "recorded 2026-01-01");
+  assert.deepEqual(sortDiagnoses([refuted, active]).map((d) => d.name), ["a", "r"]);
+});
+
+test("the timeline reaches a record dated after today", () => {
+  const bounds = fullRange({ ...record, events: [...record.events, { kind: "visit", lane: "care", id: "f1", date: "2027-03-01", title: "planned" }] });
+  assert.ok(bounds.to > toDay("2027-03-01"));
 });

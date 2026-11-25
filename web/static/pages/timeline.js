@@ -8,8 +8,8 @@ import { dataTable, el, emptyState, formatDate } from "../components.js";
 import { LANG, t } from "../strings.js";
 import { tn } from "./labs-model.js";
 import {
-  canZoomIn, eventDetails, eventLabel, eventTitle, fullRange, isPendingEvent, isRefuted, isWhole, kindWord,
-  lanesOf, laneWord, panRange, panelLinks, periodDates, periodDetails, periodLabel, presentLanes, rangeText,
+  canZoomIn, eventDetails, eventLabel, eventTitle, fullRange, isPendingEvent, isRefuted, isUncertain, isUndatedEnd, isWhole, kindWord,
+  lanesOf, laneWord, panRange, panelLinks, periodDates, periodEnd, periodDetails, periodLabel, presentLanes, rangeText,
   scaleX, tableRows, ticks, toDay, yearCellLabel, yearCells, yearRange, zoomRange,
 } from "./timeline-model.js";
 
@@ -19,6 +19,7 @@ const LANE_HEAD = 20;
 const ROW = 26;
 const LANE_GAP = 10;
 const BAR = 18;
+const UNDATED_STUB = 14; // px: a period with no recorded end is drawn this wide from its start
 const CHAR = 6.6; // px per character of the 12px label font, near enough to decide what fits
 
 function svg(tag, attributes = {}, ...children) {
@@ -201,28 +202,30 @@ export async function render(view) {
             ? svg("text", { class: "tl-label", x: cx + 10, y: cy + 4 }, title.length * CHAR > room ? `${title.slice(0, Math.max(3, Math.floor(room / CHAR) - 1))}…` : title)
             : null;
           group.append(interactive(event, eventLabel(event),
-            svg("g", { class: [isPendingEvent(event) && "tl-pending", isRefuted(event) && "tl-refuted"].filter(Boolean).join(" ") || null },
+            svg("g", { class: [isPendingEvent(event) && "tl-pending", isRefuted(event) && "tl-refuted", isUncertain(event) && "tl-uncertain"].filter(Boolean).join(" ") || null },
               mark(lane.id, cx, cy)),
             label));
         });
         y += ROW;
       }
       for (const row of lane.rows) {
-        const spans = row.map((period) => ({ period, start: toDay(period.start), end: period.end ? toDay(period.end) : today }));
+        // a period that is over but has no end date covers only its start: a short faded stub
+        const spans = row.map((period) => ({ period, start: toDay(period.start), end: periodEnd(period, today) ?? toDay(period.start) }));
         spans.forEach(({ period, start, end }, i) => {
           if (end < range.from || start > range.to) return;
+          const undated = isUndatedEnd(period);
           const x1 = Math.max(x(start), -4);
-          const x2 = Math.min(x(end), width + 4);
+          const x2 = undated ? x1 + UNDATED_STUB : Math.min(x(end), width + 4);
           const barY = y + (ROW - BAR) / 2;
           const w = Math.max(3, x2 - x1);
           const tip = period.ongoing && x(end) <= width ? 9 : 0;
           group.append(interactive(period, periodLabel(period),
-            svg("rect", { class: `tl-bar${period.ongoing ? " tl-ongoing" : ""}`, x: x1, y: barY, width: w, height: BAR, rx: 3 }),
+            svg("rect", { class: `tl-bar${period.ongoing ? " tl-ongoing" : ""}${undated ? " tl-undated" : ""}`, x: x1, y: barY, width: w, height: BAR, rx: 3 }),
             tip > 0 && svg("path", { class: "tl-arrow", d: `M${x2},${barY - 2}l7,${BAR / 2 + 2}l-7,${BAR / 2 + 2}Z` }),
             barLabel(period.title, {
               x1, x2, tip, y: barY + 13, width,
               // the room beside the bar, up to its neighbours in the same row
-              before: i > 0 ? x(spans[i - 1].end) + 4 : 0,
+              before: i > 0 ? Math.max(x(spans[i - 1].end), x(spans[i - 1].start) + (isUndatedEnd(spans[i - 1].period) ? UNDATED_STUB : 0)) + 4 : 0,
               after: i + 1 < spans.length ? x(spans[i + 1].start) - 4 : width,
             })));
         });
@@ -327,7 +330,13 @@ export async function render(view) {
       legendSwatch(lane), " ", laneWord(lane))),
     el("span", { class: "tl-key-pending" },
       svg("svg", { class: "tl-swatch tl-lane-labs", width: 18, height: 16, viewBox: "0 0 18 16", "aria-hidden": "true" },
-        svg("g", { class: "tl-pending" }, mark("labs", 9, 8))), " ", t("timeline.key.pending")));
+        svg("g", { class: "tl-pending" }, mark("labs", 9, 8))), " ", t("timeline.key.pending")),
+    el("span", { class: "tl-key-pending" },
+      svg("svg", { class: "tl-swatch tl-lane-diagnoses", width: 18, height: 16, viewBox: "0 0 18 16", "aria-hidden": "true" },
+        svg("g", { class: "tl-uncertain" }, mark("diagnoses", 9, 8))), " ", t("timeline.key.uncertain")),
+    el("span", { class: "tl-key-pending" },
+      svg("svg", { class: "tl-swatch tl-lane-medications", width: 18, height: 16, viewBox: "0 0 18 16", "aria-hidden": "true" },
+        svg("rect", { class: "tl-bar tl-undated", x: 1, y: 4, width: 12, height: 8, rx: 2 })), " ", t("timeline.key.undated")));
 
   const table = dataTable({
     caption: t("timeline.table.caption"),

@@ -17,7 +17,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   **Medications**: allergies first, boxed; what is taken now and before, with dose, route, dates,
   how long, what for and why it stopped, and the recorded paracetamol per day (a sum of recorded
   doses, never a safety verdict). **Diagnoses**: grouped by certainty (confirmed / provisional /
-  suspected / refuted) with ICD-10 code and clinical status; an active one with nothing recorded
+  suspected / refuted) with ICD-10 code and clinical status; an active one whose entry is unchanged
   for two years carries a neutral hint to review it with a doctor. **Habits**: each with its
   amount and how long it has run or how long ago it stopped, and a strip over the years. New
   endpoints `GET /api/v1/timeline`, `/medications`, `/diagnoses`, `/habits`.

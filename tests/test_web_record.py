@@ -179,6 +179,19 @@ def test_paracetamol_sum_names_what_it_cannot_count():
     assert paracetamol([med("Paracetamol")])["mg_per_day"] is None
 
 
+def test_a_gram_dose_is_counted_like_check_medication_safety_counts_it():
+    from mcp_server.tools import medication_safety
+
+    meds = [{"name": "Gelocatil", "dose_amount": 1, "dose_unit": "g", "times_per_day": 4,
+             "atc_code": None},
+            {"name": "Paracetamol", "dose_amount": 500, "dose_unit": "mg", "times_per_day": 2,
+             "atc_code": None}]
+    out = paracetamol(meds)
+    assert out["mg_per_day"] == 5000 and out["missing_dose"] == [] and out["over_limit"] is True
+    mcp = medication_safety([{**m, "medication_name": m["name"]} for m in meds])
+    assert mcp["paracetamol"]["total_mg_per_day"] == out["mg_per_day"]
+
+
 # ------------------------------------------------------------------------------------ diagnoses
 
 def test_diagnoses_are_grouped_by_certainty_in_a_fixed_order(conn, get):
@@ -232,3 +245,22 @@ def test_habits_say_how_long_they_ran_and_how_long_ago_they_ended(conn, get):
     assert running["days"] == (TODAY - date.fromisoformat(running["start_date"])).days
     assert running["days_since_end"] is None and running["frequency"] == "3 times a week"
     assert by_type["alcohol"]["drinks_per_week"] == 3
+
+
+def test_a_stop_or_quit_with_no_end_date_has_no_length(conn, user_id, get):
+    add_medication(conn, user_id, "Sample stopped", start_date=_ago(400), status="stopped")
+    assert "error" not in add_habit(conn, user_id, "smoking", status="former",
+                                    start_date=_ago(4000))
+    [med] = get("medications")["past"]
+    assert med["end_date"] is None and med["days"] is None
+    [habit] = get("habits")["habits"]
+    assert habit["days"] is None and habit["days_since_end"] is None
+    periods = get("timeline")["periods"]
+    assert all(p["end"] is None and p["ongoing"] is False for p in periods)
+
+
+def test_a_refuted_diagnosis_left_active_gets_no_review_hint(conn, user_id, get):
+    add_diagnosis(conn, user_id, "Sample refuted", diagnosed_at=_ago(1000),
+                  verification_status="refuted")  # clinical_status stays the default "active"
+    [group] = get("diagnoses")["groups"]
+    assert group["verification"] == "refuted" and group["rows"][0]["review_hint"] is False

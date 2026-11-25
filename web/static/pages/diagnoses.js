@@ -8,7 +8,7 @@ import { el } from "../components.js";
 import { LANG, t } from "../strings.js";
 import { tn } from "./labs-model.js";
 import {
-  diagnosisDates, isActive, reviewCount, reviewHint, sortDiagnoses, verificationNote, verificationTitle, word,
+  clinicalTag, diagnosisDates, isActive, reviewCount, reviewHint, sortDiagnoses, verificationNote, verificationTitle,
 } from "./record-model.js";
 
 function diagnosisItem(d, today) {
@@ -17,7 +17,7 @@ function diagnosisItem(d, today) {
     el("p", { class: "rec-dx-name" },
       el("span", { class: "rec-dx-title" }, d.name),
       d.icd10_code && el("code", { class: "rec-icd", title: t("record.diagnosis.icd") }, d.icd10_code),
-      d.clinical_status && el("span", { class: "rec-tag" }, word("clinical", d.clinical_status)),
+      clinicalTag(d) && el("span", { class: "rec-tag" }, clinicalTag(d)),
       d.severity && el("span", { class: "rec-tag" }, d.severity)),
     el("p", { class: "quiet" }, diagnosisDates(d)),
     d.notes && el("p", { class: "quiet" }, d.notes),

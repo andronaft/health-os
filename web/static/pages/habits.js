@@ -43,7 +43,8 @@ function strip(data, view) {
     }
     const bars = dated.map((h, i) => {
       const bar = habitBar(h, from, today);
-      return svg("rect", { class: `hb-bar hb-${h.status}`, x: bar.left * width, y: 22 + i * ROW + 5, width: bar.width * width, height: ROW - 10, rx: 4 });
+      return svg("rect", { class: `hb-bar hb-${h.status}${bar.undated ? " hb-undated" : ""}`, x: bar.left * width, y: 22 + i * ROW + 5,
+        width: bar.undated ? 10 : bar.width * width, height: ROW - 10, rx: 4 });
     });
     plot.replaceChildren(svg("svg", { width, height, viewBox: `0 0 ${width} ${height}`, role: "img",
       "aria-label": t("record.habits.strip_label") }, ...grid, ...bars));

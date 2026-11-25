@@ -26,9 +26,22 @@ const yearStart = (year) => Date.UTC(year, 0, 1) / DAY_MS;
 export const laneWord = (lane) => t(`timeline.lane.${lane}`);
 
 /**
+ * Where a period ends, in days: its end date; today while it is ongoing; null when it is over but
+ * its end was never recorded (it must not be drawn as running to today).
+ */
+export function periodEnd(period, today) {
+  if (period.end) return toDay(period.end);
+  return period.ongoing ? today : null;
+}
+
+/** A period that is over, with no end date: drawn as a short faded stub, said in words. */
+export const isUndatedEnd = (period) => !period.end && !period.ongoing;
+
+/**
  * Rows for one lane's periods: a bar goes into the first row where it doesn't overlap the one
  * before it, so overlapping courses (two medications at once) sit one above the other.
- * → [[period, …], …]; an open-ended period runs to `today`.
+ * → [[period, …], …]; an ongoing period runs to `today`, one with no recorded end only covers
+ * its start day.
  */
 export function packRows(periods, today) {
   const rows = [];
@@ -36,7 +49,7 @@ export function packRows(periods, today) {
   const sorted = [...periods].sort((a, b) => toDay(a.start) - toDay(b.start) || a.title.localeCompare(b.title));
   for (const period of sorted) {
     const start = toDay(period.start);
-    const end = period.end ? toDay(period.end) : today;
+    const end = periodEnd(period, today) ?? start;
     let row = ends.findIndex((last) => last < start);
     if (row === -1) {
       row = rows.length;
@@ -62,16 +75,20 @@ export function lanesOf(data, hidden = new Set()) {
 export const presentLanes = (data) => lanesOf(data).map((lane) => lane.id);
 
 /**
- * The whole record: from the first event or period to today, with a little room at both ends
- * so a dot on the edge isn't cut in half. { from, to } in days.
+ * The whole record: from the first event or period to today (or to the latest record, if one is
+ * dated later: a planned visit, a discharge), with a little room at both ends so a mark on the
+ * edge isn't cut in half. { from, to } in days.
  */
 export function fullRange(data) {
   const today = toDay(data.today);
   const starts = [...data.events.map((event) => toDay(event.date)), ...data.periods.map((period) => toDay(period.start))];
+  const ends = [...data.events.filter((event) => event.end).map((event) => toDay(event.end)),
+    ...data.periods.filter((period) => period.end).map((period) => toDay(period.end))];
   const first = starts.length ? Math.min(...starts) : today - YEAR;
-  const span = Math.max(today - first, MIN_SPAN_DAYS);
-  // a little room at the start; at the end only enough for today's mark and an arrow
-  return { from: first - Math.round(span * 0.02) - 7, to: today + Math.round(span * 0.01) + 7 };
+  const last = Math.max(today, ...starts, ...ends);
+  const span = Math.max(last - first, MIN_SPAN_DAYS);
+  // a little room at the start; at the end only enough for the last mark and an arrow
+  return { from: first - Math.round(span * 0.02) - 7, to: last + Math.round(span * 0.01) + 7 };
 }
 
 const clampRange = ({ from, to }, bounds) => {
@@ -164,7 +181,7 @@ export function yearCells(data) {
     // ongoing periods are "in" every year they span: the strip shows them as a quiet underline
     const ongoing = data.periods.some((period) => {
       const start = yearOf(toDay(period.start));
-      const end = period.end ? yearOf(toDay(period.end)) : lastYear;
+      const end = yearOf(periodEnd(period, today) ?? toDay(period.start));
       return start <= year && year <= end;
     });
     cells.push({ year, n, level: n ? Math.min(4, Math.ceil((n / max) * 4)) : 0, ongoing,
@@ -186,11 +203,27 @@ export const isPendingEvent = (event) => event.kind === "panel" && event.pending
 /** Not believed any more: drawn hollow and struck through, said in words. */
 export const isRefuted = (event) => event.kind === "diagnosis" && event.verification === "refuted";
 
+/** Not confirmed (provisional, differential, suspected, or not recorded): drawn dashed, never
+ * like a confirmed diagnosis. */
+export const isUncertain = (event) => event.kind === "diagnosis" && event.verification !== "confirmed" && !isRefuted(event);
+
+/** A stored value's word, or the value itself (underscores as spaces): never a raw key. */
+function word(group, stored) {
+  const key = `timeline.${group}.${stored}`;
+  const found = t(key);
+  return found === key ? String(stored).replaceAll("_", " ") : found;
+}
+
 /** The details under an event's title: plain facts from its own record. */
 export function eventDetails(event) {
   switch (event.kind) {
     case "diagnosis":
-      return [event.icd10, event.verification && t(`timeline.verification.${event.verification}`), event.clinical && t(`timeline.clinical.${event.clinical}`)].filter(Boolean);
+      return [
+        event.icd10,
+        word("verification", event.verification ?? "unknown"),
+        // a refuted diagnosis is no longer anything clinically, whatever status it was left with
+        !isRefuted(event) && event.clinical && word("clinical", event.clinical),
+      ].filter(Boolean);
     case "panel":
       return [
         event.facility,
@@ -219,10 +252,15 @@ export function eventLabel(event) {
   return `${kind}, ${formatDate(event.date)}: ${[title !== kind && title, ...eventDetails(event)].filter(Boolean).join(" · ")}`;
 }
 
-/** "2017-11-25 → today" or "2022-11-25 → 2023-05-27" */
+/** "2017-11-25 → today", "2022-11-25 → 2023-05-27" or "2004-11-24 → end not recorded" */
 export function periodDates(period) {
-  return `${formatDate(period.start)} → ${period.end ? formatDate(period.end) : t("timeline.today")}`;
+  return `${formatDate(period.start)} → ${periodEndText(period)}`;
 }
+
+const periodEndText = (period) => {
+  if (period.end) return formatDate(period.end);
+  return t(period.ongoing ? "timeline.today" : "timeline.end_not_recorded");
+};
 
 export function periodDetails(period) {
   const stopped = period.kind === "medication" && !period.ongoing && period.status !== "taking";
@@ -249,7 +287,7 @@ export function tableRows(data) {
       pending: isPendingEvent(event),
     })),
     ...data.periods.map((period) => ({
-      date: formatDate(period.start), end: period.end ? formatDate(period.end) : t("timeline.today"),
+      date: formatDate(period.start), end: periodEndText(period),
       lane: laneWord(period.lane), kind: kindWord(period.kind), title: period.title,
       details: periodDetails(period).join(" · "), pending: false,
     })),

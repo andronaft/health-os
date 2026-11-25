@@ -1157,6 +1157,20 @@ tbody tr:last-child td {
   stroke-dasharray: 3 2;
 }
 
+/* not confirmed: a pale fill and a dashed edge, like on the Diagnoses page */
+.tl-uncertain .tl-mark {
+  fill: color-mix(in srgb, var(--lane) 25%, var(--surface));
+  stroke: var(--lane);
+  stroke-dasharray: 2.5 2;
+}
+
+/* over, but its end was never recorded: a short faded stub, never a bar to today */
+.tl-bar.tl-undated {
+  fill: var(--surface);
+  stroke-dasharray: 3 2;
+  opacity: 0.7;
+}
+
 /* ruled out: hollow, and struck through where it is named */
 .tl-refuted .tl-mark {
   fill: var(--surface);
@@ -1455,6 +1469,10 @@ tbody tr:last-child td {
   fill: color-mix(in srgb, var(--chart-4) 35%, var(--surface));
   stroke: var(--chart-4);
   stroke-width: 1.5;
+}
+
+.hb-bar.hb-undated {
+  opacity: 0.6;
 }
 
 .hb-bar.hb-former {

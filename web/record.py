@@ -13,8 +13,13 @@ from datetime import date, timedelta
 from sqlalchemy import text
 
 from core import queries as q
+from mcp_server.tools import _dose_mg
 from safety.critical_values import LANGUAGES
-from safety.interactions import PARACETAMOL_MAX_DAILY_MG, is_paracetamol
+from safety.interactions import (
+    PARACETAMOL_MAX_DAILY_MG,
+    check_paracetamol_load,
+    is_paracetamol,
+)
 
 # a diagnosis that is still active but has had no change recorded for this long is worth a look
 REVIEW_AFTER_DAYS = 730
@@ -192,23 +197,20 @@ def _plain_number(value) -> str | None:
 # ---------------------------------------------------------------------------------- medications
 
 def paracetamol(current: list[dict]) -> dict | None:
-    """The recorded paracetamol per day across current medications: mg per dose × doses per day,
-    as recorded. Only for a dose recorded in mg with a count per day; a product without one is
-    named, never counted as 0 (that would read as less than it is). None when no current
-    medication is paracetamol. No verdict below the limit: a sum, not reassurance."""
+    """The recorded paracetamol per day across current medications: the same products, dose
+    conversion (mg or g) and sum check_medication_safety uses, so the page and the MCP tool give
+    one number. A product without a dose it can convert is named, never counted as 0 (that would
+    read as less than it is). None when no current medication is paracetamol. No verdict below
+    the limit: a sum, not reassurance."""
     products = [m for m in current if is_paracetamol(m["name"], m["atc_code"])]
     if not products:
         return None
-    total, missing = 0.0, []
-    for m in products:
-        unit = (m["dose_unit"] or "").strip().lower()
-        if m["dose_amount"] and m["times_per_day"] and unit == "mg":
-            total += m["dose_amount"] * m["times_per_day"]
-        else:
-            missing.append(m["name"])
-    return {"products": [m["name"] for m in products], "mg_per_day": total or None,
-            "missing_dose": missing, "limit_mg": PARACETAMOL_MAX_DAILY_MG,
-            "over_limit": total > PARACETAMOL_MAX_DAILY_MG}
+    load = check_paracetamol_load([
+        {"name": m["name"], "mg_per_dose": _dose_mg(m), "doses_per_day": m["times_per_day"]}
+        for m in products])
+    return {"products": load.products, "mg_per_day": round(load.total_mg_per_day) or None,
+            "missing_dose": load.missing_dose, "limit_mg": PARACETAMOL_MAX_DAILY_MG,
+            "over_limit": load.level == "exceeded"}
 
 
 def medications(conn, lang: str = "en") -> dict:
@@ -218,7 +220,10 @@ def medications(conn, lang: str = "en") -> dict:
         return {"today": today, "allergies": [], "current": [], "past": [], "paracetamol": None}
     rows = _medication_rows(conn, uid)
     for m in rows:
-        m["days"] = ((m["end_date"] or today) - m["start_date"]).days
+        # only a medication still taken runs to today; a stopped one with no end date has no
+        # known length
+        end = m["end_date"] or (today if m["status"] == "taking" else None)
+        m["days"] = (end - m["start_date"]).days if end else None
     current = [m for m in rows if m["status"] == "taking"]
     past = sorted((m for m in rows if m["status"] != "taking"),
                   key=lambda m: (m["end_date"] or m["start_date"]), reverse=True)
@@ -267,6 +272,8 @@ def habits(conn, lang: str = "en") -> dict:
     for h in rows:
         start, end = h["start_date"], h["end_date"]
         # days it ran, and for a habit that ended, the days since: plain date arithmetic
-        h["days"] = ((end or today) - start).days if start else None
+        # only a current habit runs to today; a former one with no end date has no known length
+        until = end or (today if h["status"] == "current" else None)
+        h["days"] = (until - start).days if start and until else None
         h["days_since_end"] = (today - end).days if end else None
     return {"today": today, "born": _born(conn, uid), "habits": rows}
