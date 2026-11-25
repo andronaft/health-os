@@ -32,6 +32,7 @@ from core.db import engine
 from web.labs import lab_index, lab_marker
 from web.overview import overview as read_overview
 from web.review import review_queue
+from web.vitals import parse_tz as parse_vitals_tz
 from web.vitals import vitals as read_vitals
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -171,8 +172,14 @@ def review(request):
 
 
 def vitals(request):
+    """?days= the window; ?tz= the browser's zone, in which days and morning/evening are read."""
     days = request.query_params.get("days")
-    return _read(request, lambda conn, lang: read_vitals(conn, lang, days))
+    try:
+        tz = parse_vitals_tz(request.query_params.get("tz"))
+    except ValueError:
+        return JSONResponse({"error": "tz must be a time zone name, e.g. Europe/Madrid"},
+                            status_code=400)
+    return _read(request, lambda conn, lang: read_vitals(conn, lang, days, tz))
 
 
 def create_app(token: str) -> Starlette:

@@ -21,7 +21,7 @@ import {
 } from "../web/static/pages/labs-model.js";
 import { printedAs, sourceMeta, sourceTitle } from "../web/static/pages/review-model.js";
 import {
-  bpKey, bpOption, diaryView, heatmapOption, heatmapSummary, panelTitle, pressure, quartiles, readoutAt as vitalsReadout,
+  bpKey, bpOption, diaryState, diaryView, heatmapOption, heatmapSummary, panelTitle, pressure, quartiles, readoutAt as vitalsReadout,
   seriesName, wearableOption, wearablePanels, windowLinks, withGaps,
 } from "../web/static/pages/vitals-model.js";
 import { t } from "../web/static/strings.js";
@@ -531,6 +531,32 @@ test("a followed diary has a mean; one that wasn't says why there is none", () =
   assert.ok(missed.lines.some((line) => line.includes("3 earlier days")));
 });
 
+test("a diary whose values have no time of day is not judged, and its mean says what it is", () => {
+  const dated = {
+    first_day: "2026-06-28", last_day: "2026-07-02", days: 5, earlier_days: 0, timing: "unrecorded",
+    followed: null, value_days: 5, untimed_readings: 10, incomplete_readings: 0,
+    mean: { systolic: 136.4, diastolic: 83.6, n: 8, days: 4, from_day: "2026-06-29" },
+  };
+  assert.equal(diaryState(dated), "unrecorded");
+  const view = diaryView(dated, PROTOCOL);
+  assert.equal(view.verdict, "Time of day not recorded");
+  assert.equal(view.icon, "?");
+  assert.equal(view.followed, false);
+  assert.equal(view.mean, "136/84");
+  assert.match(view.meanNote, /Plain mean of 8 values on 4 days from 2026-06-29.*Not a protocol check/);
+  assert.equal(view.sessions, null);
+  assert.match(view.lines[0], /10 values on 5 days, each with a date but no time/);
+  assert.ok(!view.lines.some((line) => line.includes("morning and 2 evening")));
+  assert.equal(diaryView({ ...dated, mean: null }, PROTOCOL).noMean, "No mean: only the first day has values.");
+});
+
+test("incomplete readings and readings without a time in a timed diary are said, not used", () => {
+  const view = diaryView(diary({ incomplete_readings: 2, untimed_readings: 3 }), PROTOCOL);
+  assert.ok(view.lines.includes("2 readings with only a systolic or only a diastolic value are not used"));
+  assert.ok(view.lines.includes("3 readings without a time of day are not used"));
+  assert.equal(diaryState(diary({ followed: false })), "not_followed");
+});
+
 test("a diary that followed the protocol but somehow has no mean shows none", () => {
   assert.equal(diaryView(diary({ mean: null }), PROTOCOL).mean, null);
 });
@@ -546,7 +572,7 @@ const reading = (at, session, systolic, diastolic) => ({ at, session, systolic, 
 test("the BP chart: sessions apart, the threshold labelled, the diaries shaded", () => {
   const bp = {
     points: [reading("2026-11-20T07:05:00+00:00", "morning", 136, 86), reading("2026-11-20T21:05:00+00:00", "evening", 130, 80),
-      reading("2026-11-05T14:30:00+00:00", "other", 128, 80)],
+      reading("2026-11-05T14:30:00+00:00", "other", 128, 80), reading("2026-11-10", "untimed", 138, 86)],
     diaries: [diary(), diary({ first_day: "2026-08-01", last_day: "2026-08-04", followed: false })],
     protocol: PROTOCOL,
   };
@@ -554,13 +580,16 @@ test("the BP chart: sessions apart, the threshold labelled, the diaries shaded",
   const names = option.series.map((s) => s.name);
   assert.ok(names.includes("Morning systolic") && names.includes("Evening diastolic") && names.includes("Other time, systolic"));
   assert.equal(option.series.find((s) => s.name === "Other time, systolic").type, "scatter");
+  const dated = option.series.find((s) => s.name === "No time of day, systolic");
+  assert.equal(dated.type, "scatter");
+  assert.match(dated.data[0].tip, /^2026-11-10\nTime of day not recorded: 138\/86 mmHg$/);
   const threshold = option.series.at(-1);
   assert.deepEqual(threshold.markLine.data.map((d) => d.yAxis), [135, 85]);
   assert.equal(threshold.markLine.data[0].name, "ESH home threshold 135");
   assert.equal(threshold.markArea.data.length, 1); // the August diary is outside the window
   const morning = option.series.find((s) => s.name === "Morning systolic");
   assert.match(morning.data[0].tip, /Morning: 136\/86 mmHg/);
-  assert.deepEqual(bpKey(bp.points).sessions.map((k) => k.label), ["Morning", "Evening", "Other time of day"]);
+  assert.deepEqual(bpKey(bp.points).sessions.map((k) => k.label), ["Morning", "Evening", "Other time of day", "Time of day not recorded"]);
   assert.deepEqual(bpKey(bp.points.slice(0, 1)).sessions.map((k) => k.session), ["morning"]);
   // the axis always reaches both threshold lines
   assert.equal(option.yAxis.min({ min: 120, max: 130 }), 80);

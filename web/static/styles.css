@@ -1046,7 +1046,11 @@ tbody tr:last-child td {
   background: var(--muted);
 }
 
-.diary[data-followed="false"] {
+.vitals-key .key-untimed::before {
+  background: var(--chart-3);
+}
+
+.diary:not([data-state="followed"]) {
   border-style: dashed;
 }
 

@@ -4,6 +4,7 @@ tested on its own first (no database); the endpoint runs on the test's own conne
 everything stays in its rolled-back transaction. Made-up values and the fictional demo patient."""
 import contextlib
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import text
@@ -11,13 +12,14 @@ from starlette.testclient import TestClient
 
 import web.app
 from core.services import get_or_create_channel_source, ingest_observation
-from seed.demo import WEARABLE_GAPS, bp_readings, load_demo
+from seed.demo import WEARABLE_GAPS, bp_dated, bp_readings, load_demo
 from web.vitals import (
     DEFAULT_WINDOW,
     bucket_for,
     bucket_start,
     diaries,
     pair_readings,
+    parse_tz,
     session_of,
     summarize_diary,
     training_load,
@@ -33,7 +35,8 @@ D0 = date(2026, 3, 2)  # a Monday
 def _reading(day: int, hour: int, systolic=130, diastolic=80, minute=0):
     at = datetime(2026, 3, 2, hour, minute, tzinfo=UTC) + timedelta(days=day)
     return {"at": at, "day": at.date(), "session": session_of(hour),
-            "systolic": systolic, "diastolic": diastolic}
+            "systolic": systolic, "diastolic": diastolic,
+            "complete": systolic is not None and diastolic is not None}
 
 
 def _diary(days: int, *, morning=2, evening=2, first=0, **values):
@@ -107,13 +110,105 @@ def test_diaries_split_on_gaps_and_a_lone_day_is_no_diary():
     assert diaries([]) == []
 
 
+MADRID = ZoneInfo("Europe/Madrid")
+
+
 def test_systolic_and_diastolic_of_one_moment_make_one_reading():
     at = datetime(2026, 3, 2, 7, 5, tzinfo=UTC)
-    rows = [("systolic_bp", at, 131), ("diastolic_bp", at, 84),
-            ("systolic_bp", at + timedelta(minutes=2), 129)]
-    readings = pair_readings(rows)
-    assert [(r["systolic"], r["diastolic"]) for r in readings] == [(131, 84), (129, None)]
+    rows = [("systolic_bp", at, 131, None, "datetime"), ("diastolic_bp", at, 84, None, "datetime"),
+            ("systolic_bp", at + timedelta(minutes=2), 129, None, "datetime")]
+    readings = pair_readings(rows, UTC)
+    assert [(r["systolic"], r["diastolic"], r["complete"]) for r in readings] == [
+        (131, 84, True), (129, None, False)]
     assert readings[0]["session"] == "morning"
+
+
+def test_two_readings_logged_at_the_same_minute_stay_two():
+    at = datetime(2026, 3, 2, 8, 0, tzinfo=UTC)
+    rows = [("systolic_bp", at, 131, None, "datetime"), ("systolic_bp", at, 127, None, "datetime"),
+            ("diastolic_bp", at, 84, None, "datetime"), ("diastolic_bp", at, 82, None, "datetime")]
+    readings = pair_readings(rows, UTC)
+    assert len(readings) == 2 and all(r["complete"] for r in readings)
+    assert sorted(r["systolic"] for r in readings) == [127, 131]
+
+
+def test_a_group_id_pairs_values_whatever_their_times():
+    at = datetime(2026, 3, 2, 8, 0, tzinfo=UTC)
+    rows = [("systolic_bp", at, 131, "g1", "datetime"),
+            ("diastolic_bp", at + timedelta(seconds=40), 84, "g1", "datetime"),
+            ("systolic_bp", at, 127, "g2", "datetime"), ("diastolic_bp", at, 82, "g2", "datetime")]
+    readings = pair_readings(rows, UTC)
+    assert sorted((r["systolic"], r["diastolic"]) for r in readings) == [(127, 82), (131, 84)]
+
+
+def test_morning_and_evening_are_read_in_the_users_zone():
+    # 17:30 in Madrid's summer is 15:30 UTC: in UTC it would fall outside the evening
+    at = datetime(2026, 7, 1, 17, 30, tzinfo=MADRID)
+    rows = [("systolic_bp", at, 130, None, "datetime"), ("diastolic_bp", at, 80, None, "datetime")]
+    assert pair_readings(rows, UTC)[0]["session"] == "other"
+    assert pair_readings(rows, MADRID)[0]["session"] == "evening"
+    # just after midnight in Madrid is still the previous day in UTC
+    late = datetime(2026, 7, 2, 0, 30, tzinfo=MADRID)
+    rows = [("systolic_bp", late, 130, None, "datetime"), ("diastolic_bp", late, 80, None, "datetime")]
+    assert pair_readings(rows, MADRID)[0]["day"] == date(2026, 7, 2)
+
+
+def test_a_value_entered_per_day_has_no_time_of_day():
+    midnight = datetime(2026, 3, 2, tzinfo=UTC)
+    rows = [("systolic_bp", midnight, 138, None, "date"), ("diastolic_bp", midnight, 86, None, "date")]
+    [reading] = pair_readings(rows, ZoneInfo("America/New_York"), day_zone=UTC)
+    assert reading["session"] == "untimed"
+    assert reading["day"] == date(2026, 3, 2)  # its own day, not the evening before in New York
+
+
+def _dated(days: int, per_day=2, first=0):
+    return [{"at": D0 + timedelta(days=d), "day": D0 + timedelta(days=d), "session": "untimed",
+             "systolic": 130 + k, "diastolic": 80 + k, "complete": True}
+            for d in range(first, first + days) for k in range(per_day)]
+
+
+def test_a_diary_without_times_is_not_judged_but_has_a_plain_mean():
+    d = summarize_diary(_dated(5))
+    assert d["timing"] == "unrecorded"
+    assert d["followed"] is None  # unknown: not "not followed"
+    assert d["value_days"] == 5 and d["untimed_readings"] == 10
+    assert d["mean"] == {"systolic": 130.5, "diastolic": 80.5, "n": 8,
+                         "from_day": D0 + timedelta(days=1), "days": 4}
+    assert "complete_days" not in d
+
+
+def test_values_without_times_in_a_timed_diary_are_counted_not_used():
+    d = summarize_diary(_diary(5) + _dated(1, first=2))
+    assert d["timing"] == "recorded" and d["followed"] is True and d["untimed_readings"] == 2
+    assert d["mean"]["n"] == 16
+
+
+def test_only_complete_pairs_count():
+    readings = _diary(5)
+    for r in readings:
+        if r["day"] == D0 + timedelta(days=3) and r["session"] == "evening":
+            r["diastolic"], r["complete"] = None, False   # the cuff saved only one number
+    d = summarize_diary(readings)
+    assert d["incomplete_readings"] == 2
+    assert d["complete_days"] == 4 and d["counted_days"] == 3 and d["followed"] is True
+    assert d["mean"]["n"] == 4 * 4 - 2  # days 2–5, without the two halves
+
+
+def test_day_one_is_a_day_with_readings():
+    # a long run whose last seven days start on a missed day: the first day with readings in them
+    # is the one discarded, so something is always discarded
+    readings = [r for r in _diary(10) if r["day"] != D0 + timedelta(days=3)]
+    d = summarize_diary(readings)
+    assert d["first_day"] == D0 + timedelta(days=4) and d["days"] == 6
+    assert d["counted_days"] == 5 and d["mean"]["from_day"] == D0 + timedelta(days=5)
+
+
+def test_time_zones():
+    assert parse_tz("Europe/Madrid") == MADRID
+    assert parse_tz("") is None and parse_tz(None) is None
+    for bad in ("Mars/Olympus", "../etc/passwd"):
+        with pytest.raises(ValueError):
+            parse_tz(bad)
 
 
 def test_windows_and_buckets():
@@ -180,8 +275,12 @@ def test_demo_diaries_follow_the_seed(demo, get, today):
     bp = get()["blood_pressure"]
     assert bp["protocol"]["threshold"] == {"systolic": 135, "diastolic": 85}
     assert "PMC9904446" in bp["protocol"]["source"]["url"]
-    latest, middle, oldest = bp["diaries"]
-    assert [d["followed"] for d in (latest, middle, oldest)] == [True, True, False]
+    latest, middle, oldest, dated = bp["diaries"]
+    assert [d["followed"] for d in (latest, middle, oldest, dated)] == [True, True, False, None]
+    assert dated["timing"] == "unrecorded" and dated["value_days"] == 5
+    kept = [(s, d) for day, s, d in bp_dated(today) if day != date.fromisoformat(dated["first_day"])]
+    assert dated["mean"]["n"] == len(kept) == 8
+    assert dated["mean"]["systolic"] == round(sum(s for s, _ in kept) / len(kept), 1)
     assert latest["last_day"] == today.isoformat() and latest["days"] == 7
     assert oldest["mean"] is None
     # the mean is the seed's own readings of the last 6 days, morning and evening
@@ -199,7 +298,7 @@ def test_points_in_the_window_raw_then_weekly(demo, get, today):
     assert len(month) == sum(since <= at.date() for at, _, _ in bp_readings(today))
     year = get("?days=365")
     assert year["window"]["bucket"] == "week"
-    assert {p["session"] for p in year["blood_pressure"]["points"]} == {"morning", "evening", "other"}
+    assert {p["session"] for p in year["blood_pressure"]["points"]} == {"morning", "evening", "other", "untimed"}
     assert all(date.fromisoformat(p["at"]).weekday() == 0 for p in year["blood_pressure"]["points"])
 
 
@@ -208,7 +307,7 @@ def test_pending_blood_pressure_is_counted_not_shown(user_id, conn, get):
     ingest_observation(conn, user_id, "Systolic", 150, "mmHg", effective_at=at,
                        review_status="pending")
     bp = get()["blood_pressure"]
-    assert bp["pending"] == 1 and bp["readings"] == 0 and bp["points"] == []
+    assert bp["pending_values"] == 1 and bp["readings"] == 0 and bp["points"] == []
 
 
 def test_wearables_are_daily_in_short_windows_and_weekly_in_a_year(demo, get, today):
@@ -263,3 +362,26 @@ def test_training_load_from_the_demo(demo, get):
     assert load["acute_days"] == 7 and load["chronic_days"] == 28
     assert [line["key"] for line in load["lines"]] == ["acute", "chronic"]
     assert all(line["points"] for line in load["lines"])
+
+
+def test_a_bad_time_zone_is_refused(client):
+    r = client.get("/api/v1/vitals?tz=Nowhere/Land", headers=HEADERS)
+    assert r.status_code == 400
+
+
+def test_an_evening_reading_in_madrid_is_an_evening_reading(user_id, conn, get):
+    at = datetime.now(MADRID).replace(hour=17, minute=30, second=0, microsecond=0) - timedelta(days=1)
+    for name, value in (("Systolic", 132), ("Diastolic", 82)):
+        ingest_observation(conn, user_id, name, value, "mmHg", effective_at=at)
+    bp = get("?tz=Europe/Madrid")["blood_pressure"]
+    [point] = bp["points"]
+    assert point["session"] == "evening" and point["at"].startswith(at.date().isoformat())
+    assert point["at"].endswith(at.isoformat()[-6:])  # sent in the user's own zone
+    # the same moment is a morning reading for someone in Los Angeles (8:30 there)
+    assert get("?tz=America/Los_Angeles")["blood_pressure"]["points"][0]["session"] == "morning"
+
+
+def test_today_is_the_users_today(user_id, get):
+    tokyo = get("?tz=Asia/Tokyo")["window"]
+    assert tokyo["tz"] == "Asia/Tokyo"
+    assert tokyo["to"] == datetime.now(ZoneInfo("Asia/Tokyo")).date().isoformat()

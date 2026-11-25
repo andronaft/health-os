@@ -22,38 +22,62 @@ const whole = (value) => (value === null || value === undefined ? "—" : String
 /** "133/83": blood pressure is read in whole mmHg; more decimals would be false precision. */
 export const pressure = (mean) => (mean ? `${whole(mean.systolic)}/${whole(mean.diastolic)}` : "—");
 
-/** A diary's protocol check, as the card says it. Only a diary that followed it has a mean. */
+/** "followed", "not_followed", or "unrecorded" when the values carry no time of day and the
+ * protocol's sessions can't be checked (the API sends followed: null then). */
+export const diaryState = (diary) => {
+  if (diary.timing === "unrecorded") return "unrecorded";
+  return diary.followed ? "followed" : "not_followed";
+};
+
+/** A diary's protocol check, as the card says it. Only a diary that followed it has the protocol's
+ * mean; one whose values have no time of day has a plain mean, labelled as not a protocol check. */
 export function diaryView(diary, protocol) {
   const per = protocol.readings_per_session;
-  const lines = [
-    t("vitals.bp.diary.complete", { n: diary.complete_days, days: diary.days, per }),
-    t("vitals.bp.diary.sessions", { n: diary.full_sessions, total: diary.sessions, per }),
-  ];
+  const state = diaryState(diary);
+  const lines = state === "unrecorded"
+    ? [t("vitals.bp.diary.unrecorded_note", { days: diary.value_days, n: diary.untimed_readings })]
+    : [
+      t("vitals.bp.diary.complete", { n: diary.complete_days, days: diary.days, per }),
+      t("vitals.bp.diary.sessions", { n: diary.full_sessions, total: diary.sessions, per }),
+    ];
   if (diary.other_readings) lines.push(t("vitals.bp.diary.other", { n: diary.other_readings }));
+  if (state !== "unrecorded" && diary.untimed_readings) {
+    lines.push(t("vitals.bp.diary.untimed", { n: diary.untimed_readings }));
+  }
+  if (diary.incomplete_readings) lines.push(t("vitals.bp.diary.incomplete", { n: diary.incomplete_readings }));
   if (diary.earlier_days) lines.push(t("vitals.bp.diary.earlier", { n: diary.earlier_days, max: protocol.max_days }));
   const view = {
     period: t("vitals.bp.diary.period", {
       first: formatDate(diary.first_day), last: formatDate(diary.last_day), days: diary.days,
     }),
-    followed: diary.followed,
-    verdict: t(diary.followed ? "vitals.bp.diary.followed" : "vitals.bp.diary.not_followed"),
+    state,
+    followed: state === "followed",
+    icon: { followed: "✓", not_followed: "–", unrecorded: "?" }[state],
+    verdict: t(`vitals.bp.diary.${state}`),
     lines,
     mean: null,
     sessions: null,
   };
-  if (diary.followed && diary.mean) {
+  if (state === "followed" && diary.mean) {
     view.mean = pressure(diary.mean);
     view.meanNote = t("vitals.bp.diary.mean_of", { n: diary.mean.n, from: formatDate(diary.mean.from_day) });
     view.sessions = t("vitals.bp.diary.by_session", {
       morning: pressure(diary.mean.morning), evening: pressure(diary.mean.evening),
     });
+  } else if (state === "unrecorded" && diary.mean) {
+    view.mean = pressure(diary.mean);
+    view.meanNote = t("vitals.bp.diary.plain_mean_of", {
+      n: diary.mean.n, days: diary.mean.days, from: formatDate(diary.mean.from_day),
+    });
+  } else if (state === "unrecorded") {
+    view.noMean = t("vitals.bp.diary.no_plain_mean");
   } else {
     view.noMean = t("vitals.bp.diary.no_mean", { min: protocol.min_days, n: diary.counted_days });
   }
   return view;
 }
 
-const SESSIONS = ["morning", "evening", "other"];
+const SESSIONS = ["morning", "evening", "other", "untimed"];
 
 /** [t, value] pairs with a break (null) wherever two points are further apart than `gap` ms, so
  * a line never bridges weeks without readings as if they had been measured. */
@@ -76,20 +100,22 @@ export function bpKey(points) {
 }
 
 export function bpTooltip(point) {
-  const when = point.n > 1
-    ? t("vitals.bp.tip.bucket", { date: formatDate(point.at), n: point.n })
-    : String(point.at).slice(0, 16).replace("T", " ");
+  let when = String(point.at).slice(0, 16).replace("T", " ");
+  if (point.n > 1) when = t("vitals.bp.tip.bucket", { date: formatDate(point.at), n: point.n });
+  else if (point.session === "untimed") when = formatDate(point.at);
   return `${when}\n${t(`vitals.session.${point.session}`)}: ${pressure(point)} mmHg`;
 }
 
 /**
  * The blood pressure chart: morning and evening as separate lines (systolic solid, diastolic
- * dashed), readings outside those hours as grey dots, each diary shaded, and the ESH home
+ * dashed), readings outside those hours as grey dots, values with no time of day as green dots,
+ * each diary shaded, and the ESH home
  * threshold as two dashed lines labelled with their source.
  */
 export function bpOption(bp, window, { colors }) {
   const gap = window.bucket === "day" ? 2.5 * DAY_MS : 1.5 * BUCKET_MS[window.bucket];
-  const color = { morning: colors.morning, evening: colors.evening, other: colors.muted };
+  const color = { morning: colors.morning, evening: colors.evening, other: colors.muted, untimed: colors.c3 };
+  const dots = new Set(["other", "untimed"]); // no line: their order within a day is unknown
   const series = [];
   for (const session of SESSIONS) {
     const points = bp.points.filter((p) => p.session === session);
@@ -98,7 +124,7 @@ export function bpOption(bp, window, { colors }) {
       const pairs = points.filter((p) => p[key] !== null).map((p) => [Date.parse(p.at), p[key], p]);
       const byTime = new Map(pairs.map(([time, , p]) => [time, p]));
       series.push({
-        type: session === "other" ? "scatter" : "line",
+        type: dots.has(session) ? "scatter" : "line",
         name: t(`vitals.bp.series.${session}.${key}`),
         color: color[session],
         symbol: dashed ? "triangle" : "circle",

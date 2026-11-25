@@ -5,7 +5,7 @@ import { api } from "../api.js";
 import { dataTable, el, emptyState, formatDate, statusPill } from "../components.js";
 import { LANG, t } from "../strings.js";
 import {
-  bpKey, bpOption, diaryView, heatmapOption, heatmapSummary, panelTitle, pressure, readoutAt,
+  bpKey, bpOption, diaryState, diaryView, heatmapOption, heatmapSummary, panelTitle, pressure, readoutAt,
   wearableHeight, wearableOption, wearablePanels, windowLinks,
 } from "./vitals-model.js";
 
@@ -23,16 +23,16 @@ function windowSwitch(window) {
 
 function diaryCard(diary, protocol) {
   const view = diaryView(diary, protocol);
-  return el("article", { class: "card diary", "data-followed": view.followed },
+  return el("article", { class: "card diary", "data-state": view.state },
     el("h3", {}, t("vitals.bp.diary.latest")),
     el("p", { class: "diary-period" }, view.period),
     el("p", { class: "diary-verdict" },
-      el("span", { class: "diary-icon", "aria-hidden": "true" }, view.followed ? "✓" : "–"), " ", view.verdict),
+      el("span", { class: "diary-icon", "aria-hidden": "true" }, view.icon), " ", view.verdict),
     view.mean
       ? el("div", { class: "diary-mean" },
         el("p", { class: "figure" }, `${view.mean} mmHg`),
         el("p", { class: "quiet" }, view.meanNote),
-        el("p", {}, view.sessions))
+        view.sessions && el("p", {}, view.sessions))
       : el("p", { class: "diary-no-mean" }, view.noMean),
     el("ul", { class: "plain diary-lines" }, ...view.lines.map((line) => el("li", {}, line))));
 }
@@ -52,7 +52,11 @@ function earlierDiaries(diaries, protocol) {
         label: t("vitals.bp.col.mean"),
         numeric: true,
         value: (d) => d.mean?.systolic ?? null,
-        render: (d) => (d.mean ? `${pressure(d.mean)} mmHg` : t("vitals.bp.col.no_mean")),
+        render: (d) => {
+          if (!d.mean) return t("vitals.bp.col.no_mean");
+          const mean = `${pressure(d.mean)} mmHg`;
+          return diaryState(d) === "unrecorded" ? t("vitals.bp.col.plain_mean", { mean }) : mean;
+        },
       },
     ],
   });
@@ -81,15 +85,15 @@ function bpSection(bp, window, charts) {
   const title = t("vitals.bp.title");
   if (!bp || !bp.readings) {
     return section(title, emptyState({ message: t("vitals.bp.empty") }),
-      bp?.pending > 0 && el("p", {}, statusPill("pending"), " ", t("vitals.bp.pending", { n: bp.pending })));
+      bp?.pending_values > 0 && el("p", {}, statusPill("pending"), " ", t("vitals.bp.pending", { n: bp.pending_values })));
   }
   const [latest, ...earlier] = bp.diaries;
   const chart = bp.points.length ? el("div", { class: "vitals-bp-chart" }) : null;
   if (chart) charts.push({ kind: "bp", element: chart, bp });
   return section(title,
-    bp.pending > 0 && el("p", { class: "vitals-pending" }, statusPill("pending"), " ", t("vitals.bp.pending", { n: bp.pending })),
+    bp.pending_values > 0 && el("p", { class: "vitals-pending" }, statusPill("pending"), " ", t("vitals.bp.pending", { n: bp.pending_values })),
     el("div", { class: "vitals-bp" },
-      latest ? diaryCard(latest, bp.protocol) : el("div", { class: "card" }, quiet(t("vitals.bp.no_diary"))),
+      latest ? diaryCard(latest, bp.protocol) : el("div", { class: "card" }, quiet(t("vitals.bp.no_diary", { gap: bp.protocol.max_gap_days }))),
       el("div", { class: "vitals-bp-plot" },
         chart && keyLine(bpKey(bp.points)),
         chart ?? quiet(t("vitals.bp.none_in_window", { days: window.days })),
@@ -202,6 +206,9 @@ function withAlpha(color, alpha) {
 export async function render(view, [days] = []) {
   const query = new URLSearchParams({ lang: LANG });
   if (days) query.set("days", days);
+  // days, "today" and morning/evening are the user's: read in the browser's zone
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (zone) query.set("tz", zone);
   const data = await api(`vitals?${query}`);
   if (!view.isConnected) return;
   const charts = [];

@@ -100,6 +100,10 @@ BP_DIARIES = [
     (96, 8, [(2, 2), (2, 0), (1, 0), (0, 2)]),  # three months ago: not followed
 ]
 BP_SINGLE = [(20, 14), (200, 13)]               # (days ago, hour): a lone daytime reading
+# a diary entered per day, as a paper diary is typed in later: each day the morning and the
+# evening session's mean, with a date but no time (time_precision 'date'), so the page can't
+# check the protocol's sessions
+BP_DATED = (150, 5)                             # (first day as days ago, days)
 
 
 def bp_readings(today: date) -> list[tuple[datetime, int, int]]:
@@ -119,6 +123,18 @@ def bp_readings(today: date) -> list[tuple[datetime, int, int]]:
     for ago, hour in BP_SINGLE:
         out.append((_at(today, ago, hour, 30), 128, 80))
     return sorted(out)
+
+
+def bp_dated(today: date) -> list[tuple[date, int, int]]:
+    """(day, systolic, diastolic) of the diary entered per day: two values a day."""
+    first, days = BP_DATED
+    out = []
+    for i in range(days):
+        ago = first - i
+        for k, base in enumerate((139, 133)):
+            out.append((today - timedelta(days=ago), round(base + 6 * _noise(ago, 20 + k)),
+                        round(base - 52 + 5 * _noise(ago, 22 + k))))
+    return out
 
 
 WEARABLE_DAYS = 365
@@ -218,6 +234,11 @@ def load_demo(conn, *, today: date | None = None) -> str:
     for at, systolic, diastolic in bp_readings(today):  # home blood pressure diaries
         ingest_observation(conn, uid, "Systolic", systolic, "mmHg", effective_at=at)
         ingest_observation(conn, uid, "Diastolic", diastolic, "mmHg", effective_at=at)
+    for day, systolic, diastolic in bp_dated(today):
+        at = datetime.combine(day, datetime.min.time())
+        for name, value in (("Systolic", systolic), ("Diastolic", diastolic)):
+            ingest_observation(conn, uid, name, value, "mmHg", effective_at=at,
+                               time_precision="date")
     for d in (0, 7):
         at = datetime.combine(today - timedelta(days=d), datetime.min.time()) + timedelta(hours=8)
         ingest_observation(conn, uid, "Weight", 68.4 - d * 0.05, "kg", effective_at=at)

@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, tzinfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import text
 
@@ -43,6 +44,7 @@ BP_SOURCE = {
 }
 BP_THRESHOLD = {"systolic": 135, "diastolic": 85}  # the same paper: home BP threshold, ≥135/85
 RAW_POINTS_MAX_DAYS = 90  # longer windows get weekly means per session
+UNTIMED = "untimed"       # the session of a value entered per day: its time of day is unknown
 
 # ---- the watch ------------------------------------------------------------------------------------
 
@@ -101,6 +103,26 @@ def session_of(hour: int) -> str:
     return "other"
 
 
+def parse_tz(value: str | None) -> tzinfo | None:
+    """The `tz` query parameter: an IANA zone name ("Europe/Madrid") or nothing (the database's
+    zone). ValueError for anything else."""
+    if not value:
+        return None
+    try:
+        return ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError) as e:
+        raise ValueError(f"unknown time zone {value!r}") from e
+
+
+def _db_zone(conn) -> ZoneInfo:
+    """The zone the database writes days in: a value entered per day sits at its midnight."""
+    name = conn.execute(text("SELECT current_setting('TimeZone')")).scalar()
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return ZoneInfo("UTC")
+
+
 def _mean(values: list[float]) -> float | None:
     return round(sum(values) / len(values), 1) if values else None
 
@@ -111,37 +133,73 @@ def _means(readings: list[dict]) -> dict:
             "n": len(readings)}
 
 
-def summarize_diary(readings: list[dict]) -> dict:
-    """One diary's protocol check. `readings`: {at, day, session, systolic, diastolic}, all of one
-    run of reading days. Only its last DIARY_DAYS days count; the first of them is discarded."""
+def _summary_window(readings: list[dict]) -> tuple[list[dict], list[date], int]:
+    """A run's last DIARY_DAYS days: its readings, its reading days, and how many reading days
+    came before them. Day one is the first day WITH readings in that span, so discarding it always
+    discards something."""
     last = max(r["day"] for r in readings)
-    first = max(min(r["day"] for r in readings), last - timedelta(days=DIARY_DAYS - 1))
-    used = [r for r in readings if r["day"] >= first]
-    per_day: dict[date, dict[str, int]] = defaultdict(lambda: {"morning": 0, "evening": 0, "other": 0})
-    for r in used:
-        per_day[r["day"]][r["session"]] += 1
-    days = sorted(per_day)
-    sessions = [n for d in days for n in (per_day[d]["morning"], per_day[d]["evening"]) if n]
-    complete = [d for d in days if per_day[d]["morning"] >= READINGS_PER_SESSION
-                and per_day[d]["evening"] >= READINGS_PER_SESSION]
-    counted = [d for d in complete if d != first]   # ESH: day one is discarded
-    followed = len(counted) >= DIARY_MIN_DAYS
-    kept = [r for r in used if r["day"] != first and r["session"] != "other"]
+    start = last - timedelta(days=DIARY_DAYS - 1)
+    used = [r for r in readings if r["day"] >= start]
+    return used, sorted({r["day"] for r in used}), len({r["day"] for r in readings if r["day"] < start})
+
+
+def summarize_diary(readings: list[dict]) -> dict:
+    """One diary's protocol check. `readings`: {at, day, session, systolic, diastolic, complete},
+    all of one run of reading days. Only its last DIARY_DAYS days count; the first of them is
+    discarded. Only complete readings (a systolic AND a diastolic) count or are averaged; the
+    rest are reported. Readings without a time of day (entered per day) can't be checked against
+    the protocol: if a diary has nothing else, it says so and gives a plain mean instead."""
+    used, days, earlier = _summary_window(readings)
+    first, last = days[0], days[-1]
+    pairs = [r for r in used if r["complete"]]
+    timed = [r for r in pairs if r["session"] != UNTIMED]
+    untimed = [r for r in pairs if r["session"] == UNTIMED]
     out = {
         "first_day": first,
         "last_day": last,
         "days": len(days),
-        "earlier_days": len({r["day"] for r in readings if r["day"] < first}),
-        "per_day": [{"day": d, **per_day[d]} for d in days],
+        "earlier_days": earlier,
+        "incomplete_readings": len(used) - len(pairs),
+        "untimed_readings": len(untimed),
+        "timing": "recorded",
+        "followed": False,
+        "mean": None,
+    }
+    if untimed and not timed:
+        kept = [r for r in untimed if r["day"] != first]
+        per_day: dict[date, int] = defaultdict(int)
+        for r in untimed:
+            per_day[r["day"]] += 1
+        out.update({
+            "timing": "unrecorded",
+            "followed": None,  # unknown, not "not followed": the values may well follow it
+            "per_day": [{"day": d, "values": per_day.get(d, 0)} for d in days],
+            "value_days": len(per_day),
+        })
+        if kept:
+            out["mean"] = {**_means(kept), "from_day": first + timedelta(days=1),
+                           "days": len({r["day"] for r in kept})}
+        return out
+
+    counts: dict[date, dict[str, int]] = {d: {"morning": 0, "evening": 0, "other": 0} for d in days}
+    for r in timed:
+        counts[r["day"]][r["session"]] += 1
+    sessions = [n for d in days for n in (counts[d]["morning"], counts[d]["evening"]) if n]
+    complete = [d for d in days if counts[d]["morning"] >= READINGS_PER_SESSION
+                and counts[d]["evening"] >= READINGS_PER_SESSION]
+    counted = [d for d in complete if d != first]   # ESH: day one is discarded
+    followed = len(counted) >= DIARY_MIN_DAYS
+    out.update({
+        "per_day": [{"day": d, **counts[d]} for d in days],
         "complete_days": len(complete),
         "counted_days": len(counted),
         "sessions": len(sessions),
         "full_sessions": sum(n >= READINGS_PER_SESSION for n in sessions),
-        "other_readings": sum(per_day[d]["other"] for d in days),
+        "other_readings": sum(counts[d]["other"] for d in days),
         "followed": followed,
-        "mean": None,
-    }
+    })
     if followed:  # a mean of an incomplete diary would pass for the protocol's number
+        kept = [r for r in timed if r["day"] != first and r["session"] != "other"]
         out["mean"] = {
             **_means(kept),
             "morning": _means([r for r in kept if r["session"] == "morning"]),
@@ -152,8 +210,8 @@ def summarize_diary(readings: list[dict]) -> dict:
 
 
 def diaries(readings: list[dict]) -> list[dict]:
-    """Runs of reading days (at most DIARY_GAP days apart) with at least two days, newest first.
-    A lone day of readings is a check, not a diary."""
+    """Runs of reading days (at most DIARY_GAP days apart: one missed day still joins) with at
+    least two days, newest first. A lone day of readings is a check, not a diary."""
     by_day: dict[date, list[dict]] = defaultdict(list)
     for r in readings:
         by_day[r["day"]].append(r)
@@ -167,14 +225,39 @@ def diaries(readings: list[dict]) -> list[dict]:
             for run in reversed(runs) if len(run) >= 2]
 
 
-def pair_readings(rows) -> list[dict]:
-    """Systolic and diastolic rows recorded at the same moment → one reading, oldest first."""
-    by_time: dict = {}
-    for code, at, value in rows:
-        reading = by_time.setdefault(at, {"at": at, "day": at.date(), "session": session_of(at.hour),
-                                          "systolic": None, "diastolic": None})
-        reading["systolic" if code == "systolic_bp" else "diastolic"] = _number(value)
-    return [by_time[at] for at in sorted(by_time)]
+def _reading(at: datetime, precision: str, systolic, diastolic, tz: tzinfo,
+             day_zone: tzinfo) -> dict:
+    timed = precision == "datetime"
+    # a value entered per day sits at midnight of the zone it was written in: its day is there
+    local = at.astimezone(tz if timed else day_zone)
+    return {"at": local if timed else local.date(), "day": local.date(),
+            "session": session_of(local.hour) if timed else UNTIMED,
+            "systolic": systolic, "diastolic": diastolic,
+            "complete": systolic is not None and diastolic is not None}
+
+
+def pair_readings(rows, tz: tzinfo, day_zone: tzinfo | None = None) -> list[dict]:
+    """(type_code, effective_at, value, group_id, time_precision) rows, oldest first → readings.
+    A reading is a systolic and a diastolic of one group when the rows have a group_id; without
+    one, the k-th systolic and the k-th diastolic recorded at the same moment, so two readings
+    logged at "08:00" stay two. Which of those systolics went with which diastolic is then unknown,
+    but neither the counts nor the means depend on it. A value left without its pair is an
+    incomplete reading."""
+    day_zone = day_zone or tz
+    groups: dict[tuple, dict[str, list]] = defaultdict(lambda: {"systolic_bp": [], "diastolic_bp": []})
+    for code, at, value, group, precision in rows:
+        key = ("group", str(group)) if group else ("time", at, precision)
+        groups[key][code].append((at, _number(value), precision))
+    readings = []
+    for by_code in groups.values():
+        systolic, diastolic = by_code["systolic_bp"], by_code["diastolic_bp"]
+        for k in range(max(len(systolic), len(diastolic))):
+            s = systolic[k] if k < len(systolic) else None
+            d = diastolic[k] if k < len(diastolic) else None
+            at, _, precision = s or d
+            readings.append(_reading(at, precision, s and s[1], d and d[1], tz, day_zone))
+    return sorted(readings, key=lambda r: (r["day"], r["session"] == UNTIMED,
+                                          r["at"] if isinstance(r["at"], datetime) else r["day"]))
 
 
 def bp_points(readings: list[dict], since: date, bucket: str) -> list[dict]:
@@ -190,26 +273,27 @@ def bp_points(readings: list[dict], since: date, bucket: str) -> list[dict]:
             for (start, session), group in sorted(groups.items())]
 
 
-def _blood_pressure(conn, uid, since: date, bucket: str) -> dict:
+def _blood_pressure(conn, uid, since: date, bucket: str, tz: tzinfo, day_zone: tzinfo) -> dict:
     rows = conn.execute(text(
-        """SELECT type_code, effective_at, value_canonical FROM v_observations
+        """SELECT type_code, effective_at, value_canonical, group_id, time_precision
+           FROM v_observations
            WHERE user_id = :u AND type_code = ANY(:codes) AND value_canonical IS NOT NULL
-           ORDER BY effective_at"""), {"u": uid, "codes": list(BP_CODES)}).all()
+           ORDER BY effective_at, id"""), {"u": uid, "codes": list(BP_CODES)}).all()
     pending = conn.execute(text(
         """SELECT count(*) FROM v_observations_pending
            WHERE user_id = :u AND type_code = ANY(:codes)"""),
         {"u": uid, "codes": list(BP_CODES)}).scalar()
-    readings = pair_readings(rows)
+    readings = pair_readings(rows, tz, day_zone)
     return {
         "unit": "mmHg",
         "points": bp_points(readings, since, bucket),
         "readings": len(readings),
-        "pending": pending,
+        "pending_values": pending,  # systolic and diastolic rows: one reading may be two
         "diaries": diaries(readings),
         "protocol": {
             "morning": list(MORNING), "evening": list(EVENING),
             "max_days": DIARY_DAYS, "min_days": DIARY_MIN_DAYS,
-            "readings_per_session": READINGS_PER_SESSION,
+            "readings_per_session": READINGS_PER_SESSION, "max_gap_days": DIARY_GAP - 1,
             "threshold": BP_THRESHOLD, "source": BP_SOURCE,
         },
     }
@@ -217,17 +301,27 @@ def _blood_pressure(conn, uid, since: date, bucket: str) -> dict:
 
 # ---- the watch ------------------------------------------------------------------------------------
 
-def _daily(conn, uid, codes, since: date, until: date) -> dict[str, dict[date, float]]:
-    """code → {day: the day's value}, aggregated in the database (DAY_AGGREGATE)."""
+def _daily(conn, uid, codes, since: date, until: date, tz: ZoneInfo,
+           day_zone: ZoneInfo) -> dict[str, dict[date, float]]:
+    """code → {day: the day's value}, aggregated in the database (DAY_AGGREGATE). A timed value's
+    day is its date in the user's zone; a value entered per day keeps the day it was written for."""
     rows = conn.execute(text(
-        """SELECT type_code, effective_at::date AS day,
+        """SELECT type_code, day,
                   CASE WHEN type_code = ANY(:max_codes) THEN max(value_canonical)
                        ELSE avg(value_canonical) END AS value
-           FROM v_observations
-           WHERE user_id = :u AND type_code = ANY(:codes) AND value_canonical IS NOT NULL
-             AND effective_at >= :since AND effective_at < :until
+           FROM (SELECT type_code, value_canonical,
+                        CASE WHEN time_precision = 'datetime'
+                             THEN (effective_at AT TIME ZONE :tz)::date
+                             ELSE (effective_at AT TIME ZONE :day_zone)::date END AS day
+                 FROM v_observations
+                 WHERE user_id = :u AND type_code = ANY(:codes) AND value_canonical IS NOT NULL
+                   AND effective_at >= :lo AND effective_at < :hi) v
+           WHERE day BETWEEN :since AND :until
            GROUP BY type_code, day"""),
-        {"u": uid, "codes": list(codes), "since": since, "until": until + timedelta(days=1),
+        {"u": uid, "codes": list(codes), "since": since, "until": until,
+         "tz": tz.key, "day_zone": day_zone.key,
+         # a day of any zone lies within a day either side of the same date in the database's
+         "lo": since - timedelta(days=2), "hi": until + timedelta(days=2),
          "max_codes": [c for c, how in DAY_AGGREGATE.items() if how == "max"]}).all()
     out: dict[str, dict[date, float]] = defaultdict(dict)
     for code, day, value in rows:
@@ -276,14 +370,19 @@ def _units(conn, codes) -> dict[str, str | None]:
         {"c": list(codes)}).all())
 
 
-def vitals(conn, lang: str = "en", days=DEFAULT_WINDOW) -> dict:
+def vitals(conn, lang: str = "en", days=DEFAULT_WINDOW, tz: tzinfo | None = None) -> dict:
+    """`tz`: the user's zone (the browser's), from parse_tz; None is the database's. Days, "today"
+    and morning/evening are read in it."""
     lang = lang if lang in LANGUAGES else "en"
     days = window_days(days)
     bucket = bucket_for(days)
-    today = conn.execute(text("SELECT current_date")).scalar()
+    day_zone = _db_zone(conn)
+    tz = tz if isinstance(tz, ZoneInfo) else day_zone
+    today = conn.execute(text("SELECT now()")).scalar().astimezone(tz).date()
     since = today - timedelta(days=days - 1)
     year_from = today - timedelta(days=HEATMAP_DAYS - 1)
-    window = {"days": days, "from": since, "to": today, "bucket": bucket, "options": list(WINDOWS)}
+    window = {"days": days, "from": since, "to": today, "bucket": bucket, "options": list(WINDOWS),
+              "tz": tz.key}
     uid = q.user_id(conn)
     if uid is None:
         return {"window": window, "blood_pressure": None, "wearables": [], "load": None,
@@ -292,7 +391,7 @@ def vitals(conn, lang: str = "en", days=DEFAULT_WINDOW) -> dict:
     units = _units(conn, (*WEARABLE_CODES, *BP_CODES))
 
     load_since = since - timedelta(days=CHRONIC_DAYS - 1)
-    daily = _daily(conn, uid, WEARABLE_CODES, min(load_since, year_from), today)
+    daily = _daily(conn, uid, WEARABLE_CODES, min(load_since, year_from), today, tz, day_zone)
     wearables = []
     for code in WEARABLE_CODES:
         in_window = {d: v for d, v in daily.get(code, {}).items() if d >= since}
@@ -315,7 +414,7 @@ def vitals(conn, lang: str = "en", days=DEFAULT_WINDOW) -> dict:
                              "days": [[d, v] for d, v in sorted(year.items())]})
     return {
         "window": window,
-        "blood_pressure": _blood_pressure(conn, uid, since, bucket),
+        "blood_pressure": _blood_pressure(conn, uid, since, bucket, tz, day_zone),
         "wearables": wearables,
         "load": load,
         "heatmaps": heatmaps,

@@ -17,8 +17,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   Battery, steps, training load as 7- and 28-day means of intensity minutes, VO₂max) share one
   time axis, zoom and pointer; a year of steps, sleep score and stress is drawn as calendar
   heatmaps. A 7-day to 5-year window switch; points are aggregated in the database per day, week
-  (1 year) or month (5 years). New endpoint `GET /api/v1/vitals?days=`. Measures without values
-  are left out; blood pressure awaiting review is counted, not drawn.
+  (1 year) or month (5 years). New endpoint `GET /api/v1/vitals?days=&tz=`: days, "today" and
+  morning/evening are read in the browser's time zone (`tz`, an IANA name; 400 for an unknown
+  one). Measures without values are left out; blood pressure awaiting review is counted, not
+  drawn. A reading is a systolic and a diastolic of one group, or recorded at the same moment
+  (two readings logged at one minute stay two); only complete pairs count. Values entered per
+  day (no time of day) are shown as such: the protocol's sessions can't be checked from them, so
+  the diary says so and gives a plain mean, labelled as not a protocol check.
+- Migration 0017: `v_observations` gains `time_precision` (appended; grants unchanged).
 - `steps` marker (LOINC 41950-7, a daily total). Run `python -m seed.load` once to add it to an
   existing database.
 - The demo patient has three home blood pressure diaries (two followed, one not) and a year of
