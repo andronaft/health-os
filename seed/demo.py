@@ -17,13 +17,16 @@ from core.services import (
     add_allergy,
     add_diagnosis,
     add_food_log,
+    add_habit,
     add_medication,
     approve_staged,
     get_or_create_channel_source,
     get_or_create_user,
     ingest_observation,
+    manual_source,
     save_meal_template,
     stage_panel,
+    stop_medication,
     upsert_profile,
 )
 
@@ -79,6 +82,91 @@ MEALS = [  # (days ago, hour, meal_type, description, wellbeing, nutrients)
      {"energy_kcal": 480, "protein": 20, "carbs": 70, "fiber": 15, "fat": 12,
       "sodium": 700, "potassium": 1200, "magnesium": 120, "folate_b9": 250, "vitamin_c": 60}),
 ]
+
+
+def _years_ago(today: date, years: float) -> date:
+    return today - timedelta(days=round(365.25 * years))
+
+
+def _ok(result: dict) -> dict:
+    """The services answer a refused write with {"error": …}: the demo must not skip one."""
+    if "error" in result:
+        raise RuntimeError(result["error"])
+    return result
+
+
+def _record(conn, uid: str, today: date) -> None:
+    """The rest of the medical record, so every timeline lane and record page has something:
+    diagnoses of each verification status, a finished medication course, habits, visits,
+    a procedure, a hospital stay, vaccinations and a document."""
+    add_diagnosis(conn, uid, "Allergic rhinitis due to pollen", icd10_code="J30.1",
+                  diagnosed_at=_years_ago(today, 9), verification_status="confirmed",
+                  severity="mild")
+    add_diagnosis(conn, uid, "Iron deficiency anaemia", icd10_code="D50.9",
+                  diagnosed_at=_years_ago(today, 4), clinical_status="resolved",
+                  verification_status="confirmed")
+    add_diagnosis(conn, uid, "Tension-type headache", icd10_code="G44.2",
+                  diagnosed_at=_years_ago(today, 1.5), verification_status="provisional")
+    add_diagnosis(conn, uid, "Hypothyroidism", icd10_code="E03.9",
+                  diagnosed_at=_years_ago(today, 2.5), clinical_status="inactive",
+                  verification_status="refuted", notes="TSH in range on repeat tests")
+
+    iron = add_medication(conn, uid, "Ferrous sulfate", start_date=_years_ago(today, 4),
+                          dose_amount=200, dose_unit="mg", route="oral", times_per_day=1,
+                          prescribed_for="Iron deficiency anaemia")
+    _ok(stop_medication(conn, uid, iron, end_date=_years_ago(today, 3.5),
+                        stop_reason="course completed"))
+    add_medication(conn, uid, "Cetirizine", start_date=_years_ago(today, 9),
+                   product_type="otc", dose_amount=10, dose_unit="mg", route="oral",
+                   times_per_day=1, dosing_pattern="seasonal",
+                   prescribed_for="Allergic rhinitis due to pollen")
+    add_medication(conn, uid, "Paracetamol", start_date=_years_ago(today, 1.5),
+                   product_type="otc", dose_amount=500, dose_unit="mg", route="oral",
+                   times_per_day=2, dosing_pattern="as_needed",
+                   prescribed_for="Tension-type headache")
+
+    _ok(add_habit(conn, uid, "smoking", status="former", cigarettes_per_day=8, smoking_years=10,
+                  start_date=_years_ago(today, 22), end_date=_years_ago(today, 12)))
+    _ok(add_habit(conn, uid, "alcohol", status="current", frequency="2–3 drinks a week",
+                  drinks_per_week=3, start_date=_years_ago(today, 20)))
+    _ok(add_habit(conn, uid, "running", status="current", frequency="3 times a week",
+                  start_date=_years_ago(today, 3)))
+
+    sid = manual_source(conn, uid)
+    clinic = conn.execute(text(
+        "INSERT INTO facilities (user_id, name, kind) VALUES (:u, 'Demo Clinic', 'clinic') "
+        "RETURNING id"), {"u": uid}).scalar()
+    hospital = conn.execute(text(
+        "INSERT INTO facilities (user_id, name, kind) VALUES (:u, 'Demo Hospital', 'hospital') "
+        "RETURNING id"), {"u": uid}).scalar()
+    p = {"u": uid, "s": sid, "c": clinic, "h": hospital}
+    for years, reason in ((9, "Sneezing and itchy eyes every spring"), (4, "Tiredness"),
+                          (1.5, "Headaches"), (0.1, "Check-up: cholesterol results")):
+        conn.execute(text(
+            "INSERT INTO doctor_visits (user_id, visit_date, facility_id, reason_for_visit, "
+            "source_id) VALUES (:u, :d, :c, :r, :s)"), {**p, "d": _years_ago(today, years),
+                                                       "r": reason})
+    conn.execute(text(
+        "INSERT INTO hospital_stays (user_id, admission_date, discharge_date, facility_id, "
+        "department, admission_diagnosis, source_id) "
+        "VALUES (:u, :a, :b, :h, 'Surgery', 'Acute appendicitis', :s)"),
+        {**p, "a": _years_ago(today, 14), "b": _years_ago(today, 14) + timedelta(days=3)})
+    conn.execute(text(
+        "INSERT INTO procedures (user_id, procedure_date, procedure_name, procedure_type, "
+        "facility_id, outcome, source_id) VALUES (:u, :d, 'Laparoscopic appendectomy', "
+        "'surgery', :h, 'recovered', :s)"), {**p, "d": _years_ago(today, 14)})
+    for years, vaccine, disease, dose in ((16, "Hepatitis B vaccine", "Hepatitis B", 3),
+                                          (7, "Tdap", "Tetanus, diphtheria, pertussis", None),
+                                          (0.9, "Influenza vaccine", "Influenza", None)):
+        conn.execute(text(
+            "INSERT INTO vaccinations (user_id, vaccination_date, vaccine_name, disease, "
+            "dose_number, facility_id, source_id) VALUES (:u, :d, :v, :dis, :n, :c, :s)"),
+            {**p, "d": _years_ago(today, years), "v": vaccine, "dis": disease, "n": dose})
+    conn.execute(text(
+        "INSERT INTO documents (user_id, document_date, doc_type, title, file_path, file_sha256, "
+        "mime_type) VALUES (:u, :d, 'discharge_summary', 'Discharge summary: appendectomy', "
+        "'demo/discharge-summary.pdf', :sha, 'application/pdf')"),
+        {"u": uid, "d": _years_ago(today, 14) + timedelta(days=3), "sha": "d" * 64})
 
 
 def _noise(i: int, k: int) -> float:
@@ -222,6 +310,7 @@ def load_demo(conn, *, today: date | None = None) -> str:
                   diagnosed_at=today - timedelta(days=30), verification_status="suspected")
     add_medication(conn, uid, "Vitamin D3", start_date=today - timedelta(days=300),
                    product_type="supplement", dose_amount=2000, dose_unit="IU", times_per_day=1)
+    _record(conn, uid, today)
 
     # labs go through the same path an MCP client uses: stage → (user) approve
     for months_ago, rows in LAB_PANELS:

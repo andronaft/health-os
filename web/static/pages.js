@@ -6,12 +6,12 @@ export const PAGES = [
   { id: "overview", title: "nav.overview", load: () => import("./pages/overview.js") },
   { id: "labs", title: "nav.labs", load: () => import("./pages/labs.js") },
   { id: "vitals", title: "nav.vitals", load: () => import("./pages/vitals.js") },
-  { id: "timeline", title: "nav.timeline" },
-  { id: "medications", title: "nav.medications" },
-  { id: "diagnoses", title: "nav.diagnoses" },
-  { id: "habits", title: "nav.habits" },
+  { id: "timeline", title: "nav.timeline", load: () => import("./pages/timeline.js") },
+  { id: "medications", title: "nav.medications", load: () => import("./pages/medications.js") },
+  { id: "diagnoses", title: "nav.diagnoses", load: () => import("./pages/diagnoses.js") },
+  { id: "habits", title: "nav.habits", load: () => import("./pages/habits.js") },
   { id: "review", title: "nav.review", load: () => import("./pages/review.js") },
-  { id: "report", title: "nav.report" },
+  { id: "report", title: "nav.report", load: () => import("./pages/report.js") },
 ];
 
 /**
