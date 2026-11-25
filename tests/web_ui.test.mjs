@@ -20,6 +20,13 @@ import {
   unconverted,
 } from "../web/static/pages/labs-model.js";
 import { printedAs, sourceMeta, sourceTitle } from "../web/static/pages/review-model.js";
+import {
+  allergyDetail, changeShort, changeText, diagnosisDetail, footerText, groupDiagnoses, loadQuestions,
+  medicationDetail, methodText, miniChart, outLead, percentText, profileLine as reportProfile, reportDate, reportRange,
+  reportUnit, reportValue, resultChange, saveQuestions, streakText, trendSpan, QUESTIONS_KEY,
+  changesNote, noOtherChanges, stoppedMedications, truncatedText,
+} from "../web/static/pages/report-model.js";
+import { DICTIONARIES, REPORT_LANGS, translator } from "../web/static/pages/report-strings.js";
 import { t } from "../web/static/strings.js";
 
 test("the stored statuses have their own word; 'normal' is shown as 'in range'", () => {
@@ -476,4 +483,187 @@ test("the printed name shows only when the marker it was matched to is named oth
 test("the review page loads", () => {
   assert.ok(PAGES.find((page) => page.id === "review").load);
   assert.equal(parseRoute("#/review").page.id, "review");
+});
+
+// ---- Doctor-visit report (#60) ----------------------------------------------------------------
+
+const en = translator("en");
+const uk = translator("uk");
+const es = translator("es");
+
+test("every report dictionary has every English word, every plural form its language needs", () => {
+  const plain = Object.keys(DICTIONARIES.en).filter((key) => !/_(one|other)$/.test(key));
+  const plurals = [...new Set(Object.keys(DICTIONARIES.en).filter((key) => /_other$/.test(key)).map((key) => key.replace(/_other$/, "")))];
+  for (const lang of REPORT_LANGS) {
+    const dict = DICTIONARIES[lang];
+    for (const key of plain) assert.ok(dict[key], `${lang}: ${key}`);
+    const forms = new Intl.PluralRules(lang).resolvedOptions().pluralCategories.filter((form) => form !== "many" || lang !== "es");
+    for (const key of plurals) for (const form of forms) assert.ok(dict[`${key}_${form}`], `${lang}: ${key}_${form}`);
+  }
+  assert.equal(translator("fr").lang, "en"); // an unknown language is English, never blank
+});
+
+test("the report's words never reassure", () => {
+  for (const lang of REPORT_LANGS) {
+    for (const text of Object.values(DICTIONARIES[lang])) {
+      assert.doesNotMatch(text.toLowerCase(), /everything is normal|all normal|todo normal|все в нормі|no problems/);
+    }
+  }
+  assert.equal(outLead({ lab_markers_seen: 9, rows: [] }, en),
+    "Among the 9 lab markers on record, none has its latest value outside the range printed on the form.");
+  assert.match(outLead({ lab_markers_seen: 9, rows: [{}] }, es), /^De los 9 parámetros/);
+  assert.match(outLead({ lab_markers_seen: 3, rows: [{}] }, uk), /^Серед 3 лабораторних показників/);
+});
+
+test("dates, numbers and units in the report's language", () => {
+  assert.equal(reportDate("2026-09-26T00:00:00+00:00", en), "26 Sept 2026");
+  assert.equal(reportDate("2026-09-26", es), "26 sept 2026");
+  assert.equal(reportDate(null, es), "");
+  assert.equal(reportValue({ value: 5.8, unit: "mmol/L" }, es), "5,8 mmol/L");
+  assert.equal(reportValue({ value: 5.8, unit: "mmol/L" }, uk), "5,8 ммоль/л");
+  assert.equal(reportValue({ value: 75, unit: "umol/L" }, en), "75 µmol/L");
+  assert.equal(reportValue({ value: 5, comparator: "<", unit: "mg/L" }, uk), "<5 мг/л");
+  assert.equal(reportValue({ value: null, text: "negativo" }, es), "negativo");
+  assert.equal(reportUnit("IU", es), "UI");
+  assert.equal(reportUnit("mmHg", uk), "мм рт. ст.");
+  assert.equal(reportUnit("x10^9/L", en), "x10^9/L"); // what it doesn't know stays as printed
+  assert.equal(reportRange({ ref_min: 0, ref_max: 5.2 }, es), "0–5,2");
+  assert.equal(reportRange({ ref_min: 1.2, ref_max: null }, en), "≥ 1.2");
+  assert.equal(reportRange({ ref_min: null, ref_max: null }, en), "");
+});
+
+test("the profile line, in the patient's grammatical gender where the language has one", () => {
+  const profile = { sex: "female", age: 41, date_of_birth: "1985-04-12", blood_type: "A", rh_factor: "+", height_cm: 168 };
+  assert.equal(reportProfile(profile, en), "Female, 41 years (born 12 Apr 1985) · blood type A+ · height 168 cm");
+  assert.match(reportProfile(profile, es), /^Mujer, 41 años \(nacida el 12 abr 1985\)/);
+  assert.match(reportProfile({ ...profile, sex: "male" }, es), /nacido el/);
+  assert.match(reportProfile(profile, uk), /народилася/);
+  assert.equal(reportProfile(null, en), "No profile on record.");
+  assert.equal(reportProfile({}, es), "No hay perfil registrado.");
+});
+
+test("allergies and medications: the records as entered, our own words translated", () => {
+  assert.equal(allergyDetail({ reaction: "rash", severity: "moderate", verified: true }, es), "reacción: rash · moderada");
+  assert.equal(allergyDetail({ reaction: null, severity: "Anaphylaxis!", verified: false }, en), "Anaphylaxis! · not verified");
+  const med = { name: "Vitamin D3", dose_amount: 2000, dose_unit: "IU", times_per_day: 1, product_type: "supplement", start_date: "2026-01-29" };
+  assert.equal(medicationDetail(med, en), "2,000 IU, 1× a day · supplement · since 29 Jan 2026");
+  assert.equal(medicationDetail(med, es), "2000 UI, 1× al día · suplemento · desde el 29 ene 2026");
+  assert.equal(medicationDetail({ ...med, end_date: "2026-11-01" }, en, { stopped: true }),
+    "2,000 IU, 1× a day · supplement · 29 Jan 2026 – 1 Nov 2026");
+  assert.equal(medicationDetail({ name: "X", product_type: "unknown-type" }, en), "");
+});
+
+test("diagnoses by status: confirmed, in question, past; a refuted one is left out", () => {
+  const d = (name, clinical, verification) => ({ name, clinical_status: clinical, verification_status: verification, at: "2026-10-26" });
+  const groups = groupDiagnoses([
+    d("A", "active", "confirmed"), d("B", "active", "suspected"), d("C", "resolved", "confirmed"),
+    d("D", "active", "refuted"), d("E", null, null), d("F", "relapse", "provisional"), d("G", "remission", "suspected"),
+  ]);
+  assert.deepEqual(groups.confirmed.map((x) => x.name), ["A", "E"]);
+  assert.deepEqual(groups.in_question.map((x) => x.name), ["B", "F"]);
+  assert.deepEqual(groups.past.map((x) => x.name), ["C", "G"]);
+  assert.equal(diagnosisDetail({ icd10: "E78.0", clinical_status: "active", verification_status: "suspected", at: "2026-10-26" }, es),
+    "E78.0 · sospecha · desde el 26 oct 2026");
+  assert.equal(diagnosisDetail({ icd10: null, clinical_status: "resolved", verification_status: "confirmed", at: null }, uk), "вилікуваний");
+});
+
+test("a change between two results is called larger than lab noise only when it is", () => {
+  const within = { percent: 8.6, rcv: 22.9, significant: false };
+  const larger = { percent: -26.7, rcv: 22.9, significant: true };
+  assert.equal(percentText(8.6, es), "+8,6 %");
+  assert.equal(percentText(-26.7, en), "−26.7 %");
+  assert.match(changeText(within, en), /^Last change \+8\.6 %: within the reference change value \(22\.9 %\)/);
+  assert.match(changeText(larger, es), /^Último cambio −26,7 %: mayor que/);
+  assert.equal(changeText(null, en), ""); // no cited number: no verdict either way
+  assert.equal(changeShort(within, uk), "остання зміна +8,6 %, RCV 22,9 %");
+  assert.equal(changeShort(null, uk), "");
+  assert.match(methodText({ markers: [{ name: "Colesterol LDL" }, { name: "Glucosa" }] }, es), /Solo para: Colesterol LDL, Glucosa\.$/);
+});
+
+test("a 'what changed' row: before and now, and whether it crossed its range", () => {
+  const row = {
+    name: "LDL", value: 3.4, unit: "mmol/L", status: "high", at: "2026-11-20", moved: "out_of_range",
+    before: { value: 2.8, unit: "mmol/L", status: "normal", at: "2026-08-27" },
+    change: { percent: 21.4, rcv: 22.9, significant: false },
+  };
+  const parts = resultChange(row, en);
+  assert.equal(parts.now, "3.4 mmol/L");
+  assert.equal(parts.status, "high");
+  assert.equal(parts.before, "before: 2.8 mmol/L, 27 Aug 2026");
+  assert.equal(parts.moved, "now out of range");
+  assert.equal(resultChange({ ...row, before: null, moved: null, status: "normal", change: null }, es).before, "primera medición");
+  assert.equal(resultChange({ ...row, before: null, moved: null, status: "normal" }, es).status, "");
+  assert.equal(streakText({ since: "2024-12-05", streak: 4 }, en), "5 Dec 2024 (4 values in a row)");
+  assert.equal(streakText({ since: "2024-12-05", streak: 5 }, uk), "5 груд. 2024 р. (5 значень поспіль)");
+});
+
+test("the footer says what the report is made of, in the report's language", () => {
+  const data = { approved_values: 56, generated_at: "2026-11-25T16:51:37+00:00" };
+  assert.equal(footerText(data, en), "Generated from 56 approved values on 25 Nov 2026. Not a medical document. Pending values are not included.");
+  assert.match(footerText(data, es), /^Generado a partir de 56 valores aprobados el 25 nov 2026\. No es un documento médico\./);
+  assert.match(footerText({ ...data, approved_values: 1 }, en), /^Generated from 1 approved value on/);
+  assert.doesNotMatch(footerText(data, uk), /\.\./);
+});
+
+test("a trend's mini-chart keeps its range band and its points inside the box", () => {
+  const trend = {
+    ref_min: 0, ref_max: 3.0,
+    points: [{ at: "2024-06-08", value: 2.9, status: "normal" }, { at: "2025-06-03", value: 3.3, status: "high" }, { at: "2026-09-26", value: 3.8, status: "high" }],
+  };
+  const chart = miniChart(trend, 200, 56);
+  assert.equal(chart.points.length, 3);
+  for (const p of chart.points) {
+    assert.ok(p.x >= 0 && p.x <= 200 && p.y >= 0 && p.y <= 56);
+  }
+  assert.ok(chart.points[2].y < chart.points[0].y); // higher value, higher on the chart
+  assert.deepEqual(chart.points.map((p) => p.out), [false, true, true]);
+  assert.ok(chart.band && chart.band.y > chart.points[2].y); // the latest value is above the band
+  assert.equal(miniChart({ ...trend, ref_min: null, ref_max: null }, 200, 56).band, null);
+  assert.equal(trendSpan(trend, en), "3 values, 8 Jun 2024 – 26 Sept 2026");
+});
+
+test("the questions stay in this browser, and blocked storage is no error", () => {
+  const store = new Map();
+  const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), removeItem: (k) => store.delete(k) };
+  assert.equal(loadQuestions(storage), "");
+  assert.equal(saveQuestions(storage, "¿Repito el LDL?"), true);
+  assert.equal(store.get(QUESTIONS_KEY), "¿Repito el LDL?");
+  assert.equal(loadQuestions(storage), "¿Repito el LDL?");
+  saveQuestions(storage, "");
+  assert.equal(store.has(QUESTIONS_KEY), false);
+  const blocked = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
+  assert.equal(loadQuestions(blocked), "");
+  assert.equal(saveQuestions(blocked, "x"), false);
+  assert.equal(loadQuestions(null), "");
+});
+
+test("every verification status has its word, 'refuted' included", () => {
+  for (const tr of [en, uk, es]) {
+    for (const status of ["confirmed", "provisional", "suspected", "differential", "refuted"]) {
+      assert.doesNotMatch(tr.t(`verification.${status}`), /^verification\./, `${tr.lang}: ${status}`);
+    }
+  }
+  assert.equal(diagnosisDetail({ icd10: null, clinical_status: "active", verification_status: "refuted", at: null }, es), "descartado");
+});
+
+test("a medication stopped on an unrecorded day is listed with the stopped ones, said so", () => {
+  const meds = { started: [], stopped: [{ name: "A", start_date: "2024-01-01", end_date: "2026-11-01" }], stopped_undated: [{ name: "B", start_date: "2024-01-01", end_date: null }] };
+  assert.deepEqual(stoppedMedications(meds).map((m) => m.name), ["A", "B"]);
+  assert.equal(medicationDetail(meds.stopped_undated[0], en, { stopped: true }), "since 1 Jan 2024 · stopped, date unknown");
+  assert.equal(medicationDetail({ name: "C" }, es, { stopped: true }), "suspendida, fecha desconocida");
+  assert.equal(noOtherChanges({ medications: { started: [], stopped: [], stopped_undated: [{}] }, diagnoses: [] }), false);
+  assert.equal(noOtherChanges({ medications: { started: [], stopped: [] }, diagnoses: [] }), true);
+});
+
+test("the since date says it is included, and a cut list says it is cut", () => {
+  assert.equal(changesNote({ since: "2026-05-27", since_source: "visit" }, en), "the last visit on record · 27 May 2026 itself included.");
+  assert.match(changesNote({ since: "2026-05-27", since_source: "default" }, es), /Incluido el propio 27 may 2026\.$/);
+  assert.equal(truncatedText({ medications: true, diagnoses: false, limit: 200 }, "medications", en), "Only the first 200 are listed; the record has more.");
+  assert.equal(truncatedText({ medications: true, diagnoses: false, limit: 200 }, "diagnoses", en), "");
+  assert.equal(truncatedText(undefined, "diagnoses", en), "");
+});
+
+test("the report page loads", () => {
+  assert.ok(PAGES.find((page) => page.id === "report").load);
+  assert.equal(parseRoute("#/report").page.id, "report");
 });

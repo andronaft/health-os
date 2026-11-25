@@ -120,7 +120,7 @@ def test_css_tokens_are_defined_and_have_both_themes():
 def test_every_word_the_ui_uses_is_in_the_table():
     table = (STATIC / "strings.js").read_text()
     keys = set(re.findall(r'^\s*"([\w.]+)":', table, re.M))
-    prefixes = "nav|theme|status|table|empty|error|connection|overview|labs|review"
+    prefixes = "nav|theme|status|table|empty|error|connection|overview|labs|review|report"
     used = set()
     for script in OUR_SCRIPTS:
         if script.name != "strings.js":
