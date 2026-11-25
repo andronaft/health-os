@@ -24,6 +24,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 - The demo patient has the rest of a medical record: diagnoses of every certainty, a finished
   medication course, an as-needed paracetamol, habits, doctor visits, a hospital stay with its
   procedure and discharge summary, and vaccinations — every timeline lane has something.
+- Browser UI: the doctor-visit report (#60), one A4 page (two at most) to print or save as PDF
+  with the browser's own print. Its language is chosen apart from the UI's (English, Ukrainian,
+  Spanish: headings, marker names, units, dates and decimal commas). It has the profile, the
+  allergies in a box of their own, current medications, diagnoses by status (confirmed, in
+  question, past), the lab markers whose latest value is out of range (the same rows as
+  `prepare_doctor_visit`'s `still_out_of_range`), up to four trend mini-charts, and "what changed
+  since" a date (default: the last visit on record, else six months): new lab results against the
+  one before, values that moved into or out of range, medications started or stopped, diagnoses
+  recorded. A change between two results is called larger than lab noise only for LDL, total
+  cholesterol and glucose, from the reference change value with the cited EFLM within-subject CV
+  (`analytics/rcv.py`). "My questions for the doctor" is kept in the browser only and printed.
+  Every printed page ends with how many approved values the report was made from, that it is not
+  a medical document and that pending values are not included. New endpoint
+  `GET /api/v1/report?lang=…&since=YYYY-MM-DD`.
 
 ## [0.4.0] — 2026-11-20
 

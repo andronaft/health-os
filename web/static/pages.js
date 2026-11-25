@@ -11,7 +11,7 @@ export const PAGES = [
   { id: "diagnoses", title: "nav.diagnoses", load: () => import("./pages/diagnoses.js") },
   { id: "habits", title: "nav.habits", load: () => import("./pages/habits.js") },
   { id: "review", title: "nav.review", load: () => import("./pages/review.js") },
-  { id: "report", title: "nav.report" },
+  { id: "report", title: "nav.report", load: () => import("./pages/report.js") },
 ];
 
 /**

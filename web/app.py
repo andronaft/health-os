@@ -35,6 +35,8 @@ from web.record import diagnoses as read_diagnoses
 from web.record import habits as read_habits
 from web.record import medications as read_medications
 from web.record import timeline as read_timeline
+from web.report import parse_since, parse_tz
+from web.report import report as read_report
 from web.review import review_queue
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -190,6 +192,21 @@ def habits(request):
     return _read(request, read_habits)
 
 
+def report(request):
+    """The doctor-visit report (#60), in the report's language; ?since=YYYY-MM-DD for "what
+    changed" (default: the last visit on record, else six months); ?tz= the browser's zone."""
+    try:
+        since = parse_since(request.query_params.get("since"))
+    except ValueError:
+        return JSONResponse({"error": "since must be a date, YYYY-MM-DD"}, status_code=400)
+    try:
+        tz = parse_tz(request.query_params.get("tz"))
+    except ValueError:
+        return JSONResponse({"error": "tz must be a time zone name, e.g. Europe/Madrid"},
+                            status_code=400)
+    return _read(request, lambda conn, lang: read_report(conn, lang, since, tz))
+
+
 def create_app(token: str) -> Starlette:
     if not token:
         raise ValueError("a session token is required")
@@ -205,6 +222,7 @@ def create_app(token: str) -> Starlette:
         Route("/api/v1/medications", medications, methods=["GET"]),
         Route("/api/v1/diagnoses", diagnoses, methods=["GET"]),
         Route("/api/v1/habits", habits, methods=["GET"]),
+        Route("/api/v1/report", report, methods=["GET"]),
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]
     return Starlette(routes=routes, middleware=[
