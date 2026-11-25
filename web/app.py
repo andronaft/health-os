@@ -31,6 +31,10 @@ from starlette.staticfiles import StaticFiles
 from core.db import engine
 from web.labs import lab_index, lab_marker
 from web.overview import overview as read_overview
+from web.record import diagnoses as read_diagnoses
+from web.record import habits as read_habits
+from web.record import medications as read_medications
+from web.record import timeline as read_timeline
 from web.report import parse_since, parse_tz
 from web.report import report as read_report
 from web.review import review_queue
@@ -171,6 +175,23 @@ def review(request):
     return _read(request, review_queue)
 
 
+# the medical-record pages (#57)
+def timeline(request):
+    return _read(request, read_timeline)
+
+
+def medications(request):
+    return _read(request, read_medications)
+
+
+def diagnoses(request):
+    return _read(request, read_diagnoses)
+
+
+def habits(request):
+    return _read(request, read_habits)
+
+
 def report(request):
     """The doctor-visit report (#60), in the report's language; ?since=YYYY-MM-DD for "what
     changed" (default: the last visit on record, else six months); ?tz= the browser's zone."""
@@ -196,6 +217,11 @@ def create_app(token: str) -> Starlette:
         Route("/api/v1/labs", labs, methods=["GET"]),
         Route("/api/v1/labs/{code}", lab, methods=["GET"]),
         Route("/api/v1/review", review, methods=["GET"]),
+        # the medical-record pages (#57)
+        Route("/api/v1/timeline", timeline, methods=["GET"]),
+        Route("/api/v1/medications", medications, methods=["GET"]),
+        Route("/api/v1/diagnoses", diagnoses, methods=["GET"]),
+        Route("/api/v1/habits", habits, methods=["GET"]),
         Route("/api/v1/report", report, methods=["GET"]),
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]
