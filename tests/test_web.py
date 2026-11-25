@@ -120,7 +120,7 @@ def test_css_tokens_are_defined_and_have_both_themes():
 def test_every_word_the_ui_uses_is_in_the_table():
     table = (STATIC / "strings.js").read_text()
     keys = set(re.findall(r'^\s*"([\w.]+)":', table, re.M))
-    prefixes = "nav|theme|status|table|empty|error|connection|overview|labs|review|report"
+    prefixes = "nav|theme|status|table|empty|error|connection|overview|labs|review|report|food"
     used = set()
     for script in OUR_SCRIPTS:
         if script.name != "strings.js":
@@ -131,6 +131,13 @@ def test_every_word_the_ui_uses_is_in_the_table():
     assert {f"overview.tile.{tile}" for tile, _, _ in TILES} <= keys
     assert {f"overview.profile.missing.{field}" for field in ("date_of_birth", "sex")} <= keys
     assert {f"overview.screening.code.{rule['code']}" for rule in _rules()} <= keys
+    assert {f"food.meal.{m}" for m in ("breakfast", "lunch", "dinner", "snack", "drink")} <= keys
+    assert {f"food.category.{c}" for c in ("energy", "macro", "fat", "mineral", "vitamin",
+                                           "other")} <= keys
+    assert {f"food.{k}.{v}" for k, vs in (("check", ("night", "unusual")),
+                                          ("flag", ("deficient", "excess")))
+            for v in vs} <= keys
+    assert {f"food.flagged.{f}{one}" for f in ("deficient", "excess") for one in ("", "_one")} <= keys
     assert {f"overview.kind.{kind}" for kind in ("diagnosis", "visit", "procedure", "panel",
                                                  "medication_start", "medication_stop", "hospital",
                                                  "vaccination")} <= keys

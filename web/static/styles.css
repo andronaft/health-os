@@ -777,6 +777,47 @@ tbody tr:last-child td {
   height: 12rem;
 }
 
+/* Food: the period switch reads as a row of links, the current one marked */
+
+.food-period {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.food-period a {
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.food-period a[aria-current="page"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* the meal's description: wide enough to read without a column of one-word lines */
+.food td.wrap {
+  min-width: 16rem;
+}
+
+.food-flagged li + li {
+  margin-top: 0.35rem;
+}
+
+.food .tile h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.food .tile p {
+  margin-bottom: 0;
+}
+
 /* Panel matrix: the word and the icon say the status; the colour only repeats it */
 
 .matrix th[scope="row"] {

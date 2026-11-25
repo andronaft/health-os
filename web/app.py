@@ -29,6 +29,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from core.db import engine
+from web.food import food_page
 from web.labs import lab_index, lab_marker
 from web.overview import overview as read_overview
 from web.record import diagnoses as read_diagnoses
@@ -220,6 +221,11 @@ def vitals(request):
     return _read(request, lambda conn, lang: read_vitals(conn, lang, days, tz))
 
 
+def food(request):
+    return _read(request, lambda conn, lang: food_page(conn, lang,
+                                                      request.query_params.get("days")))
+
+
 def create_app(token: str) -> Starlette:
     if not token:
         raise ValueError("a session token is required")
@@ -230,6 +236,7 @@ def create_app(token: str) -> Starlette:
         Route("/api/v1/labs", labs, methods=["GET"]),
         Route("/api/v1/labs/{code}", lab, methods=["GET"]),
         Route("/api/v1/review", review, methods=["GET"]),
+        Route("/api/v1/food", food, methods=["GET"]),
         Route("/api/v1/vitals", vitals, methods=["GET"]),
         # the medical-record pages (#57)
         Route("/api/v1/timeline", timeline, methods=["GET"]),

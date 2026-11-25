@@ -105,6 +105,9 @@ a chart per marker with the range of each form, its trend and your personal base
 matrix; values awaiting review are drawn hollow and count nowhere. The Review queue page lists
 every value awaiting review, grouped by the staging it came in, with what can't wait and what
 wasn't recognized first and the staging id to give your MCP client; it approves nothing itself.
+The Food page shows the food diary over 7, 30 or 90 days: averages per logged day against the
+catalog's norms (the same numbers as `nutrition_report`), energy and sodium/potassium by day, every
+nutrient (one never logged says so), and the meals, with a note on a meal time that looks wrong.
 The other pages are still empty — they come in
 later releases ([milestone](https://github.com/andronaft/health-os/milestone/1)). Nothing is loaded from
 outside this machine: Apache ECharts is kept in `web/static/vendor/` with its licence.
