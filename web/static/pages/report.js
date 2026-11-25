@@ -7,7 +7,8 @@ import { api, explain } from "../api.js";
 import { el, errorState } from "../components.js";
 import { LANG, t } from "../strings.js";
 import {
-  LANG_KEY, allergyDetail, changeShort, changesSource, changesTitle, diagnosisDetail, footerText,
+  LANG_KEY, allergyDetail, browserZone, changeShort, changesNote, stoppedMedications, truncatedText,
+  changesTitle, diagnosisDetail, footerText,
   groupDiagnoses, loadQuestions, medicationDetail, methodText, miniChart, noOtherChanges, outLead,
   profileLine, reportDate, reportRange, reportUnit, reportValue, resultChange, saveQuestions,
   statusText, streakText, trendLabel, trendSpan,
@@ -55,10 +56,12 @@ function allergies(data, tr) {
 }
 
 function medications(data, tr) {
+  const cut = truncatedText(data.truncated, "medications", tr);
   return section("report-meds", tr.t("meds.title"),
     data.medications.length
       ? list(data.medications.map((m) => item(m.name, medicationDetail(m, tr))))
-      : el("p", { class: "quiet" }, tr.t("meds.none")));
+      : el("p", { class: "quiet" }, tr.t("meds.none")),
+    cut && el("p", { class: "report-note" }, cut));
 }
 
 function diagnoses(data, tr) {
@@ -67,8 +70,10 @@ function diagnoses(data, tr) {
     el("div", { class: "report-diag-group", "data-group": key },
       el("h3", {}, tr.t(`diag.${key}`)),
       list(groups[key].map((d) => item(d.name, diagnosisDetail(d, tr))))));
+  const cut = truncatedText(data.truncated, "diagnoses", tr);
   return section("report-diagnoses", tr.t("diag.title"),
-    ...(parts.length ? parts : [el("p", { class: "quiet" }, tr.t("diag.none"))]));
+    ...(parts.length ? parts : [el("p", { class: "quiet" }, tr.t("diag.none"))]),
+    cut && el("p", { class: "report-note" }, cut));
 }
 
 function outOfRange(data, tr) {
@@ -134,11 +139,11 @@ function changes(data, tr) {
     el("h3", {}, tr.t(key)),
     list(rows.map((m) => item(m.name, medicationDetail(m, tr, { stopped })))));
   return section("report-changes", changesTitle(c, tr),
-    el("p", { class: "report-note" }, changesSource(c, tr)),
+    el("p", { class: "report-note" }, changesNote(c, tr)),
     el("h3", {}, tr.t("changes.results")),
     results.length ? list(results) : el("p", { class: "quiet" }, tr.t("changes.results.none", { date: reportDate(c.since, tr) })),
     meds("changes.meds_started", c.medications.started, false),
-    meds("changes.meds_stopped", c.medications.stopped, true),
+    meds("changes.meds_stopped", stoppedMedications(c.medications), true),
     c.diagnoses.length > 0 && el("div", {},
       el("h3", {}, tr.t("changes.diagnoses")),
       list(c.diagnoses.map((d) => item(d.name, diagnosisDetail(d, tr))))),
@@ -222,16 +227,29 @@ function controls(state, rerender, data) {
 
 export async function render(view) {
   const state = { lang: savedLang(), since: null };
+  let latest = 0;
   const draw = async () => {
+    // only the latest request may draw: a slow answer for the previous language or date is stale
+    const request = ++latest;
     const query = new URLSearchParams({ lang: state.lang });
     if (state.since) query.set("since", state.since);
-    const data = await api(`report?${query}`);
+    const zone = browserZone();
+    if (zone) query.set("tz", zone);
+    let data;
+    try {
+      data = await api(`report?${query}`);
+    } catch (err) {
+      if (request !== latest) return; // a stale request's failure is no error of the page now
+      throw err;
+    }
+    if (request !== latest) return;
     const tr = translator(state.lang);
     view.replaceChildren(el("div", { class: "report" }, controls(state, redraw, data), sheet(data, tr)));
   };
   // a change of language or date: the frame only catches the first render's errors
   const redraw = () => draw().catch((err) => {
     console.error(err);
+    if (!view.isConnected) return;
     view.replaceChildren(errorState({ message: explain(err), onRetry: redraw }));
   });
   await draw();

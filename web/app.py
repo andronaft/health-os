@@ -31,7 +31,7 @@ from starlette.staticfiles import StaticFiles
 from core.db import engine
 from web.labs import lab_index, lab_marker
 from web.overview import overview as read_overview
-from web.report import parse_since
+from web.report import parse_since, parse_tz
 from web.report import report as read_report
 from web.review import review_queue
 
@@ -173,12 +173,17 @@ def review(request):
 
 def report(request):
     """The doctor-visit report (#60), in the report's language; ?since=YYYY-MM-DD for "what
-    changed" (default: the last visit on record, else six months)."""
+    changed" (default: the last visit on record, else six months); ?tz= the browser's zone."""
     try:
         since = parse_since(request.query_params.get("since"))
     except ValueError:
         return JSONResponse({"error": "since must be a date, YYYY-MM-DD"}, status_code=400)
-    return _read(request, lambda conn, lang: read_report(conn, lang, since))
+    try:
+        tz = parse_tz(request.query_params.get("tz"))
+    except ValueError:
+        return JSONResponse({"error": "tz must be a time zone name, e.g. Europe/Madrid"},
+                            status_code=400)
+    return _read(request, lambda conn, lang: read_report(conn, lang, since, tz))
 
 
 def create_app(token: str) -> Starlette:

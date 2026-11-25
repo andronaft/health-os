@@ -97,9 +97,9 @@ export function medicationDetail(med, tr, { stopped = false } = {}) {
   const dose = has(med.dose_amount) ? `${reportNumber(med.dose_amount, tr)} ${reportUnit(med.dose_unit ?? "", tr)}`.trim() : "";
   const perDay = has(med.times_per_day) ? tr.t("meds.per_day", { n: reportNumber(med.times_per_day, tr) }) : "";
   const product = med.product_type && tr.t(`product.${med.product_type}`);
-  const when = stopped && med.end_date
-    ? tr.t("meds.until", { from: reportDate(med.start_date, tr), to: reportDate(med.end_date, tr) })
-    : med.start_date && tr.t("meds.since", { date: reportDate(med.start_date, tr) });
+  let when = med.start_date && tr.t("meds.since", { date: reportDate(med.start_date, tr) });
+  if (stopped && med.end_date) when = tr.t("meds.until", { from: reportDate(med.start_date, tr), to: reportDate(med.end_date, tr) });
+  else if (stopped) when = [when, tr.t("meds.stopped_undated")].filter(Boolean).join(" · ");
   return [
     [dose, perDay].filter(Boolean).join(", "),
     product && !product.startsWith("product.") && product,
@@ -188,11 +188,30 @@ export function changesTitle(changes, tr) {
   return tr.t("changes.title", { date: reportDate(changes.since, tr) });
 }
 
-export const changesSource = (changes, tr) => tr.t(`changes.source.${changes.since_source}`);
-
 /** True when no medication or diagnosis changed: one sentence instead of three empty lists. */
 export const noOtherChanges = ({ medications, diagnoses }) =>
-  !medications.started.length && !medications.stopped.length && !diagnoses.length;
+  !medications.started.length && !medications.stopped.length &&
+  !(medications.stopped_undated ?? []).length && !diagnoses.length;
+
+/** The stopped list: dated ones first, then those stopped on a day nobody recorded. */
+export const stoppedMedications = ({ stopped, stopped_undated: undated = [] }) => [...stopped, ...undated];
+
+/** "the last visit on record · 27 May 2026 itself included." */
+export const changesNote = (changes, tr) =>
+  `${tr.t(`changes.source.${changes.since_source}`)} · ${tr.t("changes.inclusive", { date: reportDate(changes.since, tr) })}`;
+
+/** A list cut at the API's row limit says so: "" when it is whole. */
+export const truncatedText = (truncated, key, tr) =>
+  (truncated?.[key] ? tr.t("list.truncated", { n: truncated.limit }) : "");
+
+/** The browser's time zone, for the server's "today"; "" when the browser doesn't say. */
+export function browserZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    return "";
+  }
+}
 
 export const footerText = (data, tr) =>
   tr.tn("footer", { n: data.approved_values, date: reportDate(data.generated_at, tr) });

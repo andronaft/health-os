@@ -190,6 +190,63 @@ def test_what_changed_since_a_date(conn, user_id, get):
     assert [d["name"] for d in changes["diagnoses"]] == ["Made-up condition"]
 
 
+def test_a_refuted_diagnosis_is_in_no_list(conn, user_id, get):
+    today = _today(conn)
+    add_diagnosis(conn, user_id, "Ruled-out condition", diagnosed_at=today - timedelta(days=2),
+                  verification_status="refuted")
+    add_diagnosis(conn, user_id, "Kept condition", diagnosed_at=today - timedelta(days=2))
+    data = get()
+    assert [d["name"] for d in data["diagnoses"]] == ["Kept condition"]
+    assert [d["name"] for d in data["changes"]["diagnoses"]] == ["Kept condition"]
+    assert "Ruled-out" not in json.dumps(data)
+
+
+def test_the_since_day_itself_is_included(conn, user_id, get):
+    since = _today(conn) - timedelta(days=30)
+    _panel(conn, user_id, since - timedelta(days=1), [("HDL", 1.4, "mmol/L", 1.2, None)])
+    _panel(conn, user_id, since, [("LDL", 2.5, "mmol/L", 0, 3.0)])
+    results = get(f"?since={since.isoformat()}")["changes"]["results"]
+    assert [r["code"] for r in results] == ["ldl"]  # the day before is not new; the day is
+
+
+def test_today_is_the_users_day_not_utcs(conn, user_id, client):
+    utc_now = conn.execute(text("SELECT now()")).scalar()
+    for zone, hours in (("Pacific/Kiritimati", 14), ("Pacific/Pago_Pago", -11)):
+        r = client.get(f"/api/v1/report?tz={zone}", headers=HEADERS)
+        assert r.status_code == 200, r.text
+        local_today = (utc_now + timedelta(hours=hours)).date()
+        data = r.json()
+        assert data["generated_at"][:10] == local_today.isoformat()
+        assert data["changes"]["since"] == (local_today
+                                            - timedelta(days=DEFAULT_SINCE_DAYS)).isoformat()
+
+
+@pytest.mark.parametrize("tz", ["Mars/Olympus", "../etc", "UTC+1"])
+def test_a_tz_that_is_no_zone_is_refused(conn, client, tz):
+    assert client.get(f"/api/v1/report?tz={tz}", headers=HEADERS).status_code == 400
+
+
+def test_a_medication_stopped_without_a_date_is_listed_as_such(conn, user_id, get):
+    add_medication(conn, user_id, "Undated stop", start_date=_today(conn) - timedelta(days=900),
+                   status="stopped")
+    data = get()
+    assert all(m["name"] != "Undated stop" for m in data["medications"])
+    meds = data["changes"]["medications"]
+    assert [m["name"] for m in meds["stopped_undated"]] == ["Undated stop"]
+    assert meds["stopped"] == []
+
+
+def test_a_cut_list_says_it_is_cut(conn, user_id, get, monkeypatch):
+    today = _today(conn)
+    for i in range(3):
+        add_medication(conn, user_id, f"Tablet {i}", start_date=today - timedelta(days=i))
+    monkeypatch.setattr(q, "MAX_ROWS", 2)
+    monkeypatch.setattr(q.view_rows, "__defaults__", (2,))
+    data = get()
+    assert len(data["medications"]) == 2
+    assert data["truncated"] == {"medications": True, "diagnoses": False, "limit": 2}
+
+
 def test_values_before_the_since_date_are_not_new_results(conn, user_id, get):
     today = _today(conn)
     _panel(conn, user_id, today - timedelta(days=90), [("HDL", 1.4, "mmol/L", 1.2, None)])

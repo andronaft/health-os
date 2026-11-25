@@ -24,6 +24,7 @@ import {
   allergyDetail, changeShort, changeText, diagnosisDetail, footerText, groupDiagnoses, loadQuestions,
   medicationDetail, methodText, miniChart, outLead, percentText, profileLine as reportProfile, reportDate, reportRange,
   reportUnit, reportValue, resultChange, saveQuestions, streakText, trendSpan, QUESTIONS_KEY,
+  changesNote, noOtherChanges, stoppedMedications, truncatedText,
 } from "../web/static/pages/report-model.js";
 import { DICTIONARIES, REPORT_LANGS, translator } from "../web/static/pages/report-strings.js";
 import { t } from "../web/static/strings.js";
@@ -634,6 +635,32 @@ test("the questions stay in this browser, and blocked storage is no error", () =
   assert.equal(loadQuestions(blocked), "");
   assert.equal(saveQuestions(blocked, "x"), false);
   assert.equal(loadQuestions(null), "");
+});
+
+test("every verification status has its word, 'refuted' included", () => {
+  for (const tr of [en, uk, es]) {
+    for (const status of ["confirmed", "provisional", "suspected", "differential", "refuted"]) {
+      assert.doesNotMatch(tr.t(`verification.${status}`), /^verification\./, `${tr.lang}: ${status}`);
+    }
+  }
+  assert.equal(diagnosisDetail({ icd10: null, clinical_status: "active", verification_status: "refuted", at: null }, es), "descartado");
+});
+
+test("a medication stopped on an unrecorded day is listed with the stopped ones, said so", () => {
+  const meds = { started: [], stopped: [{ name: "A", start_date: "2024-01-01", end_date: "2026-11-01" }], stopped_undated: [{ name: "B", start_date: "2024-01-01", end_date: null }] };
+  assert.deepEqual(stoppedMedications(meds).map((m) => m.name), ["A", "B"]);
+  assert.equal(medicationDetail(meds.stopped_undated[0], en, { stopped: true }), "since 1 Jan 2024 · stopped, date unknown");
+  assert.equal(medicationDetail({ name: "C" }, es, { stopped: true }), "suspendida, fecha desconocida");
+  assert.equal(noOtherChanges({ medications: { started: [], stopped: [], stopped_undated: [{}] }, diagnoses: [] }), false);
+  assert.equal(noOtherChanges({ medications: { started: [], stopped: [] }, diagnoses: [] }), true);
+});
+
+test("the since date says it is included, and a cut list says it is cut", () => {
+  assert.equal(changesNote({ since: "2026-05-27", since_source: "visit" }, en), "the last visit on record · 27 May 2026 itself included.");
+  assert.match(changesNote({ since: "2026-05-27", since_source: "default" }, es), /Incluido el propio 27 may 2026\.$/);
+  assert.equal(truncatedText({ medications: true, diagnoses: false, limit: 200 }, "medications", en), "Only the first 200 are listed; the record has more.");
+  assert.equal(truncatedText({ medications: true, diagnoses: false, limit: 200 }, "diagnoses", en), "");
+  assert.equal(truncatedText(undefined, "diagnoses", en), "");
 });
 
 test("the report page loads", () => {

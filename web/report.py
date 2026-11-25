@@ -7,12 +7,21 @@ rows prepare_doctor_visit sends as still_out_of_range. "What changed" compares t
 each lab marker measured since a date with its latest value before it; a change between the two is
 called larger than lab noise only for the markers analytics.rcv has a cited number for.
 Plain data, no model output. The user's own records (diagnosis and medication names, allergens)
-are as entered, not translated.
+are as entered, not translated. A refuted diagnosis is no diagnosis: it is never sent.
+
+Days. "Today" is the user's day: in the browser's time zone (`tz`, an IANA name), else this
+machine's (the server runs on the user's own computer). The since date is INCLUDED: a result dated
+on the day of the last visit counts as new, since a blood test drawn that day was rarely back in
+time to be discussed at that visit; better a result shown twice than one never shown. A result's
+day is the date part of its stored time in UTC, the day the UI prints for it (a lab panel has a
+date and no time, stored as UTC midnight): shifting it into a local zone would move a panel to the
+day before for anyone west of Greenwich.
 """
 from __future__ import annotations
 
 import math
-from datetime import date, timedelta
+from datetime import date, timedelta, tzinfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import text
 
@@ -40,6 +49,17 @@ def parse_since(value: str | None) -> date | None:
     if not value:
         return None
     return date.fromisoformat(value)
+
+
+def parse_tz(value: str | None) -> tzinfo | None:
+    """The `tz` query parameter: an IANA zone name ("Europe/Madrid") or nothing (this machine's
+    zone). ValueError for anything else."""
+    if not value:
+        return None
+    try:
+        return ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError) as e:
+        raise ValueError(f"unknown time zone {value!r}") from e
 
 
 def _value(r) -> dict:
@@ -82,12 +102,14 @@ def _new_results(conn, uid, since: date, names: dict) -> list[dict]:
         text("""WITH after AS (
                     SELECT DISTINCT ON (type_code) *, count(*) OVER (PARTITION BY type_code) AS n
                     FROM v_observations
-                    WHERE user_id=:u AND category='lab' AND effective_at >= :s
+                    WHERE user_id=:u AND category='lab'
+                      AND (effective_at AT TIME ZONE 'UTC')::date >= :s
                     ORDER BY type_code, effective_at DESC),
                 before AS (
                     SELECT DISTINCT ON (type_code) *
                     FROM v_observations
-                    WHERE user_id=:u AND category='lab' AND effective_at < :s
+                    WHERE user_id=:u AND category='lab'
+                      AND (effective_at AT TIME ZONE 'UTC')::date < :s
                     ORDER BY type_code, effective_at DESC)
                 SELECT a.type_code, a.n,
                        a.effective_at, a.value_numeric, a.comparator, a.value_text, a.unit,
@@ -129,12 +151,16 @@ def _medication_changes(conn, uid, since: date) -> dict:
                        start_date, end_date, prescribed_for, status
                 FROM medications
                 WHERE user_id=:u AND deleted_at IS NULL
-                  AND (start_date >= :s OR (status <> 'taking' AND end_date >= :s))
+                  AND (start_date >= :s
+                       OR (status <> 'taking' AND (end_date >= :s OR end_date IS NULL)))
                 ORDER BY start_date DESC, medication_name"""),
         {"u": uid, "s": since}).mappings().all()
+    stopped = [r for r in rows if r["status"] != "taking"]
+    # a medication not taken any more with no end date is on neither the current list nor a
+    # dated one: it goes with the stopped ones, said to be without a date
     return {"started": [_medication(r) for r in rows if r["start_date"] >= since],
-            "stopped": [_medication(r) for r in rows
-                        if r["status"] != "taking" and r["end_date"] and r["end_date"] >= since]}
+            "stopped": [_medication(r) for r in stopped if r["end_date"] is not None],
+            "stopped_undated": [_medication(r) for r in stopped if r["end_date"] is None]}
 
 
 def _diagnosis(r) -> dict:
@@ -170,10 +196,11 @@ def _trends(conn, uid, markers: list[dict], first: list[str], names: dict) -> li
     return out
 
 
-def report(conn, lang: str = "en", since: date | None = None) -> dict:
+def report(conn, lang: str = "en", since: date | None = None, tz: tzinfo | None = None) -> dict:
     lang = lang if lang in LANGUAGES else "en"
     uid = q.user_id(conn)
-    now = conn.execute(text("SELECT now()")).scalar()
+    # the user's day, not UTC's: the browser's zone, else this machine's
+    now = conn.execute(text("SELECT now()")).scalar().astimezone(tz)
     today = now.date()
     counts = conn.execute(
         text("""SELECT (SELECT count(*) FROM v_observations WHERE user_id=:u) AS approved,
@@ -191,8 +218,9 @@ def report(conn, lang: str = "en", since: date | None = None) -> dict:
     window = _since(conn, uid, today, since)
     markers = q.markers(conn, uid)
     still = q.open_results(conn, uid)
-    medications = q.view_rows(conn, uid, "medications")["rows"]
-    diagnoses = q.view_rows(conn, uid, "diagnoses")["rows"]
+    medications = q.view_rows(conn, uid, "medications")
+    diagnoses = q.view_rows(conn, uid, "diagnoses")
+    known = [d for d in diagnoses["rows"] if d["verification_status"] != "refuted"]
     s = window["date"]
 
     return {
@@ -209,8 +237,11 @@ def report(conn, lang: str = "en", since: date | None = None) -> dict:
         "allergies": [{"allergen": a["allergen"], "reaction": a["reaction"],
                        "severity": a["severity"], "verified": bool(a["verified"])}
                       for a in facts["allergies"]],
-        "medications": [_medication(m) for m in medications],
-        "diagnoses": [_diagnosis(d) for d in diagnoses],
+        "medications": [_medication(m) for m in medications["rows"]],
+        "diagnoses": [_diagnosis(d) for d in known],
+        # a list cut at q.MAX_ROWS says so instead of passing for the whole list
+        "truncated": {"medications": medications["truncated"],
+                      "diagnoses": diagnoses["truncated"], "limit": q.MAX_ROWS},
         "out_of_range": {
             "lab_markers_seen": still["lab_markers_seen"],
             "rows": [{"code": r["type_code"], "name": names.get(r["type_code"], r["type_code"]),
@@ -225,7 +256,7 @@ def report(conn, lang: str = "en", since: date | None = None) -> dict:
             "last_visit": window["last_visit"],
             "results": _new_results(conn, uid, s, names),
             "medications": _medication_changes(conn, uid, s),
-            "diagnoses": [_diagnosis(d) for d in diagnoses if d["diagnosed_at"] >= s],
+            "diagnoses": [_diagnosis(d) for d in known if d["diagnosed_at"] >= s],
         },
         "rcv": {"z": rcv.Z_95, "cva_share": rcv.CVA_SHARE,
                 "markers": [{"code": c, "name": names.get(c, c), "cvi": cvi,
