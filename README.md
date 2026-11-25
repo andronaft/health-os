@@ -2,6 +2,7 @@
 
 [![tests](https://github.com/andronaft/health-os/actions/workflows/tests.yml/badge.svg)](https://github.com/andronaft/health-os/actions/workflows/tests.yml)
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/andronaft/health-os)
+[![andronaft/health-os MCP server](https://glama.ai/mcp/servers/andronaft/health-os/badges/score.svg)](https://glama.ai/mcp/servers/andronaft/health-os)
 
 **Local-first personal health record, exposed over [MCP](https://modelcontextprotocol.io).**
 Your labs, diagnoses, medications, wearable data and food log live in your own Postgres; any
