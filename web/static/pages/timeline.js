@@ -345,6 +345,16 @@ export async function render(view) {
   const undated = data.undated_habits > 0 && el("p", { class: "quiet" },
     tn("timeline.undated_habits", { n: data.undated_habits }), " ", el("a", { href: "#/habits" }, t("timeline.open_habits")));
 
+  const tableBox = el("details", { class: "tl-table" },
+    el("summary", {}, t("timeline.table.summary", { n: tableRows(data).length })),
+    table.element);
+  // the chart can't print every mark legibly: the table does, so a print opens it
+  const openForPrint = () => {
+    if (tableBox.isConnected) tableBox.open = true;
+    else window.removeEventListener("beforeprint", openForPrint);
+  };
+  window.addEventListener("beforeprint", openForPrint);
+
   view.replaceChildren(el("div", { class: "timeline" },
     el("p", { class: "quiet" }, t("timeline.note")),
     el("section", { class: "tl-life" },
@@ -359,9 +369,7 @@ export async function render(view) {
     el("p", { class: "quiet", id: "tl-keys" }, t("timeline.keys")),
     undated,
     detail,
-    el("details", { class: "tl-table" },
-      el("summary", {}, t("timeline.table.summary", { n: tableRows(data).length })),
-      table.element)));
+    tableBox));
 
   detail.replaceChildren(detailCard(null));
   draw();
