@@ -23,7 +23,7 @@ from core.services import (
 )
 from safety.critical_values import GENERIC, MESSAGES
 from safety.policy import DISCLAIMER
-from seed.demo import load_demo
+from seed.demo import bp_readings, load_demo
 from web.overview import AVERAGE_DAYS, rolling_average
 
 HEADERS = {"X-Health-OS-Token": "t"}
@@ -127,8 +127,9 @@ def test_screening_matches_the_calendar(conn, demo, get):
 
 def test_the_demo_markers_add_up(demo, get):
     data = get()
-    # 9 lab markers: LDL, total cholesterol high, vitamin D low, 6 in range; BP and weight no range
-    assert data["coverage"] == {"recorded": 12, "in_range": 6, "out_of_range": 3, "no_range": 3,
+    # 9 lab markers: LDL, total cholesterol high, vitamin D low, 6 in range; BP, weight and the
+    # watch's 12 daily measures have no range
+    assert data["coverage"] == {"recorded": 24, "in_range": 6, "out_of_range": 3, "no_range": 15,
                                 "last_panel": data["coverage"]["last_panel"],
                                 "last_panel_pending": True}
     rows = _by_code(data["attention"]["out_of_range"])
@@ -154,7 +155,7 @@ def test_a_pending_value_reaches_only_the_pending_list(demo, get):
     # vitamin D stays at its latest approved value, and ferritin, only ever pending, isn't counted
     assert _by_code(data["attention"]["out_of_range"])["vitamin_d"]["value"] == 22
     assert "ferritin" not in _by_code(data["attention"]["out_of_range"])
-    assert data["coverage"]["recorded"] == 12
+    assert data["coverage"]["recorded"] == 24
 
 
 def test_a_pending_blood_pressure_stays_out_of_the_tile(conn, user_id, get):
@@ -251,16 +252,17 @@ def test_blood_pressure_is_a_seven_day_average(demo, get):
     data = get()
     tile = _tile(data, "blood_pressure")
     assert tile["average_days"] == AVERAGE_DAYS == 7 and tile["unit"] == "mmHg"
-    assert tile["readings"] == 7
-    # the demo's values, as seed/demo.py writes them: d days ago
-    systolic = [128 + (d * 7) % 11 for d in range(7)]
-    diastolic = [82 + (d * 5) % 7 for d in range(7)]
+    # the demo's values, as seed/demo.py writes them: this week's home diary, 4 readings a day
+    today = date.today()
+    week = [(s, d) for at, s, d in bp_readings(today) if (today - at.date()).days < 7]
+    assert tile["readings"] == len(week) == 28
     values = _by_code(tile["values"])
-    assert values["systolic_bp"]["value"] == round(sum(systolic) / 7, 1)
-    assert values["diastolic_bp"]["value"] == round(sum(diastolic) / 7, 1)
+    assert values["systolic_bp"]["value"] == round(sum(s for s, _ in week) / len(week), 1)
+    assert values["diastolic_bp"]["value"] == round(sum(d for _, d in week) / len(week), 1)
     assert values["systolic_bp"]["status"] is None  # an average isn't in or out of a range
     assert [s["code"] for s in tile["series"]] == ["systolic_bp", "diastolic_bp"]
-    assert len(tile["series"][0]["points"]) == 14  # one per day
+    days = {at.date() for at, _, _ in bp_readings(today) if (today - at.date()).days <= 30}
+    assert len(tile["series"][0]["points"]) == len(days)  # one per day with readings
 
 
 def test_the_average_counts_a_week_of_readings_and_every_reading_of_a_day(conn, user_id, get):

@@ -211,7 +211,9 @@ def test_migration_0014_moves_the_names_and_back(scratch_db):
             "uk": "Поживна", "en": "Nutrient"}
         assert "name_uk" not in _columns(c, "observation_types")
         assert "name_uk" not in _columns(c, "nutrient_types")
-        assert _columns(c, "v_observations") == [*old_columns, "loinc_code", "facility"]
+        # 0014's columns follow the old ones; later migrations may only append after them
+        new_columns = _columns(c, "v_observations")
+        assert new_columns[:len(old_columns) + 2] == [*old_columns, "loinc_code", "facility"]
         assert tuple(c.execute(text("""SELECT name_uk, loinc_code, facility FROM v_observations
                                        WHERE id=:i"""), {"i": oid}).one()) == (
             "Показник", "1-8", "Demo Lab")

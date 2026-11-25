@@ -21,6 +21,10 @@ import {
 } from "../web/static/pages/labs-model.js";
 import { printedAs, sourceMeta, sourceTitle } from "../web/static/pages/review-model.js";
 import {
+  bpKey, bpOption, diaryState, diaryView, heatmapOption, heatmapSummary, panelTitle, pressure, quartiles, readoutAt as vitalsReadout,
+  seriesName, wearableOption, wearablePanels, windowLinks, withGaps,
+} from "../web/static/pages/vitals-model.js";
+import {
   allergyDetail, changeShort, changeText, diagnosisDetail, footerText, groupDiagnoses, loadQuestions,
   medicationDetail, methodText, miniChart, outLead, percentText, profileLine as reportProfile, reportDate, reportRange,
   reportUnit, reportValue, resultChange, saveQuestions, streakText, trendSpan, QUESTIONS_KEY,
@@ -936,4 +940,196 @@ test("the since date says it is included, and a cut list says it is cut", () => 
 test("the report page loads", () => {
   assert.ok(PAGES.find((page) => page.id === "report").load);
   assert.equal(parseRoute("#/report").page.id, "report");
+});
+
+// ---- Vitals (#56) ---------------------------------------------------------------------------------
+
+const PROTOCOL = {
+  morning: [4, 12], evening: [16, 24], max_days: 7, min_days: 3, readings_per_session: 2,
+  threshold: { systolic: 135, diastolic: 85 }, source: { label: "ESH 2021", url: "https://example.org" },
+};
+const COLORS = {
+  morning: "#1", evening: "#2", muted: "#3", c1: "#a", c2: "#b", c3: "#c", c4: "#d", area: "#e",
+  low: "#f", high: "#g", empty: "#h", bg: "#i",
+};
+const diary = (extra = {}) => ({
+  first_day: "2026-11-19", last_day: "2026-11-25", days: 7, earlier_days: 0, complete_days: 7,
+  counted_days: 6, sessions: 14, full_sessions: 14, other_readings: 0, followed: true,
+  mean: {
+    systolic: 133.5, diastolic: 83.04, n: 24, from_day: "2026-11-20",
+    morning: { systolic: 135.5, diastolic: 85.8, n: 12 }, evening: { systolic: 131.4, diastolic: 80.3, n: 12 },
+  },
+  ...extra,
+});
+
+test("the window switch offers the API's windows and marks the current one", () => {
+  const links = windowLinks({ days: 90, options: [7, 30, 90, 365] });
+  assert.deepEqual(links.map((l) => l.href), ["#/vitals/7", "#/vitals/30", "#/vitals/90", "#/vitals/365"]);
+  assert.deepEqual(links.filter((l) => l.current).map((l) => l.days), [90]);
+  assert.equal(links[3].label, "1 year");
+});
+
+test("blood pressure is shown in whole mmHg", () => {
+  assert.equal(pressure({ systolic: 133.5, diastolic: 83.04 }), "134/83");
+  assert.equal(pressure({ systolic: 133, diastolic: null }), "133/—");
+  assert.equal(pressure(null), "—");
+});
+
+test("a followed diary has a mean; one that wasn't says why there is none", () => {
+  const followed = diaryView(diary(), PROTOCOL);
+  assert.equal(followed.mean, "134/83");
+  assert.equal(followed.verdict, "Protocol followed");
+  assert.match(followed.meanNote, /24 morning and evening readings from 2026-11-20; the first day is left out/);
+  assert.equal(followed.sessions, "Morning 136/86 · evening 131/80 mmHg");
+  const missed = diaryView(diary({
+    followed: false, mean: null, complete_days: 2, counted_days: 1, other_readings: 2, earlier_days: 3,
+  }), PROTOCOL);
+  assert.equal(missed.mean, null);
+  assert.equal(missed.verdict, "Protocol not followed");
+  assert.match(missed.noMean, /needs 3 complete days after the first one, and this diary has 1/);
+  assert.ok(missed.lines.some((line) => line.includes("2 readings taken outside")));
+  assert.ok(missed.lines.some((line) => line.includes("3 earlier days")));
+});
+
+test("a diary whose values have no time of day is not judged, and its mean says what it is", () => {
+  const dated = {
+    first_day: "2026-06-28", last_day: "2026-07-02", days: 5, earlier_days: 0, timing: "unrecorded",
+    followed: null, value_days: 5, untimed_readings: 10, incomplete_readings: 0,
+    mean: { systolic: 136.4, diastolic: 83.6, n: 8, days: 4, from_day: "2026-06-29" },
+  };
+  assert.equal(diaryState(dated), "unrecorded");
+  const view = diaryView(dated, PROTOCOL);
+  assert.equal(view.verdict, "Time of day not recorded");
+  assert.equal(view.icon, "?");
+  assert.equal(view.followed, false);
+  assert.equal(view.mean, "136/84");
+  assert.match(view.meanNote, /Plain mean of 8 values on 4 days from 2026-06-29.*Not a protocol check/);
+  assert.equal(view.sessions, null);
+  assert.match(view.lines[0], /10 values on 5 days, each with a date but no time/);
+  assert.ok(!view.lines.some((line) => line.includes("morning and 2 evening")));
+  assert.equal(diaryView({ ...dated, mean: null }, PROTOCOL).noMean, "No mean: only the first day has values.");
+});
+
+test("incomplete readings and readings without a time in a timed diary are said, not used", () => {
+  const view = diaryView(diary({ incomplete_readings: 2, untimed_readings: 3 }), PROTOCOL);
+  assert.ok(view.lines.includes("2 readings with only a systolic or only a diastolic value are not used"));
+  assert.ok(view.lines.includes("3 readings without a time of day are not used"));
+  assert.equal(diaryState(diary({ followed: false })), "not_followed");
+});
+
+test("a diary that followed the protocol but somehow has no mean shows none", () => {
+  assert.equal(diaryView(diary({ mean: null }), PROTOCOL).mean, null);
+});
+
+test("lines break across gaps instead of bridging them", () => {
+  assert.deepEqual(withGaps([[0, 1], [1, 2], [10, 3]], 5), [[0, 1], [1, 2], [5.5, null], [10, 3]]);
+  assert.deepEqual(withGaps([], 5), []);
+});
+
+const window = { days: 30, from: "2026-10-27", to: "2026-11-25", bucket: "day" };
+const reading = (at, session, systolic, diastolic) => ({ at, session, systolic, diastolic, n: 1 });
+
+test("the BP chart: sessions apart, the threshold labelled, the diaries shaded", () => {
+  const bp = {
+    points: [reading("2026-11-20T07:05:00+00:00", "morning", 136, 86), reading("2026-11-20T21:05:00+00:00", "evening", 130, 80),
+      reading("2026-11-05T14:30:00+00:00", "other", 128, 80), reading("2026-11-10", "untimed", 138, 86)],
+    diaries: [diary(), diary({ first_day: "2026-08-01", last_day: "2026-08-04", followed: false })],
+    protocol: PROTOCOL,
+  };
+  const option = bpOption(bp, window, { colors: COLORS });
+  const names = option.series.map((s) => s.name);
+  assert.ok(names.includes("Morning systolic") && names.includes("Evening diastolic") && names.includes("Other time, systolic"));
+  assert.equal(option.series.find((s) => s.name === "Other time, systolic").type, "scatter");
+  const dated = option.series.find((s) => s.name === "No time of day, systolic");
+  assert.equal(dated.type, "scatter");
+  assert.match(dated.data[0].tip, /^2026-11-10\nTime of day not recorded: 138\/86 mmHg$/);
+  const threshold = option.series.at(-1);
+  assert.deepEqual(threshold.markLine.data.map((d) => d.yAxis), [135, 85]);
+  assert.equal(threshold.markLine.data[0].name, "ESH home threshold 135");
+  assert.equal(threshold.markArea.data.length, 1); // the August diary is outside the window
+  const morning = option.series.find((s) => s.name === "Morning systolic");
+  assert.match(morning.data[0].tip, /Morning: 136\/86 mmHg/);
+  assert.deepEqual(bpKey(bp.points).sessions.map((k) => k.label), ["Morning", "Evening", "Other time of day", "Time of day not recorded"]);
+  assert.deepEqual(bpKey(bp.points.slice(0, 1)).sessions.map((k) => k.session), ["morning"]);
+  // the axis always reaches both threshold lines
+  assert.equal(option.yAxis.min({ min: 120, max: 130 }), 80);
+  assert.equal(option.yAxis.max({ min: 120, max: 130 }), 140);
+});
+
+const day = (at, value) => ({ at, value, n: 1 });
+const wearables = [
+  { code: "sleep_duration", name: "Sleep duration", unit: "h", days: 2, points: [day("2026-11-24", 7.2), day("2026-11-25", 6.8)] },
+  { code: "sleep_deep", name: "Deep sleep", unit: "h", days: 2, points: [day("2026-11-24", 1.2), day("2026-11-25", 1.0)] },
+  { code: "hrv", name: "Heart rate variability", unit: "ms", days: 1, points: [day("2026-11-25", 48)] },
+  { code: "sleep_score", name: "Sleep score", unit: "score", days: 1, points: [day("2026-11-24", 81)] },
+  { code: "steps", name: "Steps", unit: "steps", days: 1, points: [day("2026-11-25", 10234)] },
+];
+
+test("panels appear only for measures with values, in a fixed order", () => {
+  const panels = wearablePanels(wearables, null);
+  assert.deepEqual(panels.map((p) => p.id), ["sleep", "sleep_score", "hrv", "steps"]);
+  assert.deepEqual(panels[0].series.map((s) => [s.name, s.bar]), [["Total", false], ["Deep", true]]);
+  assert.equal(panelTitle(panels[0]), "Sleep (h)");
+  assert.equal(panelTitle(panels[1]), "Sleep score"); // a score is no unit
+  assert.deepEqual(wearablePanels([], null), []);
+  assert.equal(seriesName({ code: "unknown_code", name: "Its own name" }), "Its own name");
+});
+
+test("training load becomes its own panel with two lines", () => {
+  const load = {
+    unit: "min", acute_days: 7, chronic_days: 28,
+    lines: [{ key: "acute", points: [day("2026-11-25", 30)] }, { key: "chronic", points: [] }],
+  };
+  const [panel] = wearablePanels([], load);
+  assert.equal(panel.id, "load");
+  assert.deepEqual(panel.series.map((s) => s.name), ["Acute (7-day mean)"]); // an empty line is left out
+});
+
+test("the synchronized chart: one grid per panel, one shared zoom and pointer", () => {
+  const panels = wearablePanels(wearables, null);
+  const option = wearableOption(panels, window, { colors: COLORS });
+  assert.equal(option.grid.length, 4);
+  assert.deepEqual(option.dataZoom.map((z) => z.xAxisIndex), [[0, 1, 2, 3], [0, 1, 2, 3]]);
+  assert.deepEqual(option.axisPointer.link, [{ xAxisIndex: "all" }]);
+  assert.deepEqual(option.xAxis.map((x) => x.axisLabel.show), [false, false, false, true]);
+  const deep = option.series.find((s) => s.name === "Deep");
+  assert.equal(deep.type, "bar");
+  assert.equal(deep.stack, "stages");
+  assert.equal(option.series.find((s) => s.name === "Steps").type, "bar");
+});
+
+test("the readout spells out every panel's value at the pointer", () => {
+  const panels = wearablePanels(wearables, null);
+  const at = vitalsReadout(panels, Date.parse("2026-11-25"));
+  assert.equal(at.title, "2026-11-25");
+  assert.deepEqual(at.lines, ["Sleep: Total 6.8 h, Deep 1 h", "HRV: 48 ms", "Steps: 10,234 steps"]);
+  assert.equal(vitalsReadout(panels, Date.parse("2026-01-01")).title, "No value at this point");
+  const weekly = vitalsReadout(panels, Date.parse("2026-11-26"), "week");
+  assert.equal(weekly.title, "Week of 2026-11-25");
+});
+
+const heatmap = {
+  code: "steps", name: "Steps", unit: "steps", from: "2025-11-26", to: "2026-11-25",
+  days: [["2026-11-23", 4000], ["2026-11-24", 8000], ["2026-11-25", 12000], ["2026-11-22", 6000]],
+};
+
+test("quartiles and the heatmap's own summary", () => {
+  assert.deepEqual(quartiles([4, 1, 3, 2, 5]), { low: 1, q1: 2, median: 3, q3: 4, high: 5 });
+  assert.equal(quartiles([]), null);
+  assert.equal(heatmapSummary(heatmap), "4 of 365 days have a value; the middle half lies between 6,000 and 8,000 steps");
+  assert.equal(heatmapSummary({ ...heatmap, unit: "score" }), "4 of 365 days have a value; the middle half lies between 6,000 and 8,000");
+});
+
+test("the heatmap is a calendar of the year, coloured from its own lowest to highest day", () => {
+  const option = heatmapOption(heatmap, { colors: COLORS });
+  assert.deepEqual(option.calendar.range, ["2025-11-26", "2026-11-25"]);
+  assert.equal(option.visualMap.min, 4000);
+  assert.equal(option.visualMap.max, 12000);
+  assert.equal(option.series[0].coordinateSystem, "calendar");
+  assert.equal(option.series[0].data.length, 4); // a day without a value is not sent as zero
+});
+
+test("the vitals page loads", () => {
+  assert.ok(PAGES.find((page) => page.id === "vitals").load);
+  assert.deepEqual(parseRoute("#/vitals/365").args, ["365"]);
 });

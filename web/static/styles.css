@@ -1832,3 +1832,227 @@ tbody tr:last-child td {
     background: var(--surface);
   }
 }
+
+/* Vitals (#56): a window switch, the BP diary card beside its chart, one tall synchronized chart
+   of the watch's values, a year of days per heatmap */
+.vitals {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.vitals h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.125rem;
+}
+
+.vitals h3 {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+}
+
+.vitals p {
+  margin: 0 0 0.5rem;
+}
+
+.vitals-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.vitals-head .quiet {
+  margin: 0;
+}
+
+.window-switch {
+  display: inline-flex;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--control-border);
+  border-radius: 0.375rem;
+  overflow: hidden;
+}
+
+.window-switch a {
+  padding: 0.25rem 0.75rem;
+  color: var(--fg);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.window-switch a + a {
+  border-inline-start: 1px solid var(--control-border);
+}
+
+.window-switch a[aria-current] {
+  background: var(--accent);
+  color: var(--surface);
+  font-weight: 600;
+}
+
+.vitals-bp {
+  display: grid;
+  grid-template-columns: minmax(16rem, 22rem) 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+.vitals-bp-chart {
+  height: 22rem;
+}
+
+.vitals-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.vitals-key [class^="key-"]::before {
+  content: "";
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-inline-end: 0.375rem;
+  border-radius: 50%;
+  vertical-align: -0.0625rem;
+}
+
+.vitals-key .key-morning::before {
+  background: var(--chart-1);
+}
+
+.vitals-key .key-evening::before {
+  background: var(--chart-2);
+}
+
+.vitals-key .key-other::before {
+  background: var(--muted);
+}
+
+.vitals-key .key-untimed::before {
+  background: var(--chart-3);
+}
+
+.diary:not([data-state="followed"]) {
+  border-style: dashed;
+}
+
+.diary-period {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.diary-verdict {
+  font-weight: 600;
+}
+
+.diary-icon {
+  display: inline-block;
+  min-width: 1.25em;
+  text-align: center;
+}
+
+.diary-mean .figure {
+  margin-bottom: 0;
+}
+
+.diary-no-mean {
+  padding: 0.5rem 0.75rem;
+  border-inline-start: 3px solid var(--pending);
+  background: color-mix(in srgb, var(--pending) 8%, transparent);
+}
+
+.diary-lines {
+  font-size: 0.9rem;
+}
+
+.diary-lines li + li {
+  margin-top: 0.25rem;
+}
+
+.diary-history {
+  margin-top: 1rem;
+}
+
+.diary-history summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.footnote {
+  margin-top: 0.75rem;
+  max-width: 60rem;
+}
+
+.vitals-readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  min-height: 3rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.vitals-readout strong {
+  flex-basis: 100%;
+}
+
+.chart.vitals-watch-chart {
+  height: auto;
+  min-height: 12rem;
+}
+
+.vitals-heatmap-figure {
+  margin: 0 0 1rem;
+}
+
+.vitals-heatmap-figure figcaption {
+  margin-bottom: 0.25rem;
+  font-size: 0.9rem;
+}
+
+/* a year of squares stays readable on a phone: it scrolls sideways instead of shrinking */
+.vitals-heatmap-scroll {
+  overflow-x: auto;
+}
+
+.chart.vitals-heatmap {
+  height: 9.5rem;
+  min-width: 40rem;
+}
+
+@media (max-width: 47.99rem) {
+  .vitals-bp {
+    grid-template-columns: 1fr;
+  }
+
+  .vitals-bp-chart {
+    height: 18rem;
+  }
+
+  .window-switch a {
+    padding: 0.25rem 0.5rem;
+  }
+}
+
+@media print {
+  .window-switch {
+    display: none;
+  }
+
+  .vitals-bp {
+    grid-template-columns: 1fr;
+  }
+
+  .vitals-heatmap-scroll {
+    overflow: visible;
+  }
+}
