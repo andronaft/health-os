@@ -1238,6 +1238,11 @@ test("the runs are shaded on their own panels, the last day included", () => {
   const weekly = withShading(option, sustained, panels, { colors: {}, bucket: "week" });
   assert.equal(weekly.series[1].markArea.label.show, false);
   assert.equal(withShading(option, { findings: [] }, panels, { colors: {} }), option);
+  const windowed = { xAxis: [{ min: Date.parse("2026-11-05") }], series: [] };
+  const clipped = withShading(windowed, sustained, panels, { colors: {} });
+  assert.deepEqual(clipped.series.map((s) => s.markArea.data[0][0].xAxis), [Date.parse("2026-11-05"), Date.parse("2026-11-05")]);
+  const later = { xAxis: [{ min: Date.parse("2026-11-06") }], series: [] };
+  assert.equal(withShading(later, sustained, panels, { colors: {} }).series.length, 1); // HRV ended before it
 });
 
 test("the vitals page loads", () => {

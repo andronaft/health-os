@@ -211,24 +211,34 @@ def _span(metrics: list[dict]) -> tuple[date, date]:
 
 
 def pair_runs(runs: list[dict], params: SustainedParams = DEFAULTS) -> list[dict]:
-    """Findings, oldest first: a resting heart rate run and an HRV run that share a day are one
-    finding (`together_days`: how many days both were outside); every other run is its own."""
+    """Findings, oldest first: resting heart rate runs and HRV runs that share a day are one
+    finding, transitively (one long HRV run across two resting heart rate runs joins all three);
+    `together_days`: on how many days both were outside. Every other run is its own finding."""
     a, b = params.paired
-    firsts = [r for r in runs if r["code"] == a]
-    seconds = [r for r in runs if r["code"] == b]
-    used: set[int] = set()
+    paired = [r for r in runs if r["code"] in (a, b)]
+    group = list(range(len(paired)))
+
+    def root(i: int) -> int:
+        while group[i] != i:
+            i = group[i]
+        return i
+
+    for i, r in enumerate(paired):
+        for j, s in enumerate(paired[:i]):
+            if (r["code"] != s["code"] and s["first_day"] <= r["last_day"]
+                    and r["first_day"] <= s["last_day"]):
+                group[root(i)] = root(j)
+    groups: dict[int, list[dict]] = {}
+    for i, r in enumerate(paired):
+        groups.setdefault(root(i), []).append(r)
     findings = []
-    for r in firsts:
-        partners = [s for s in seconds if s["first_day"] <= r["last_day"]
-                    and r["first_day"] <= s["last_day"]]
-        used.update(id(s) for s in partners)
-        metrics = [r, *partners]
-        days_a = {d for d, _ in r["values"]}
-        together = len(days_a & {d for s in partners for d, _ in s["values"]}) if partners else None
-        findings.append({"metrics": metrics, "together_days": together})
-    for r in runs:
-        if r["code"] != a and id(r) not in used:
-            findings.append({"metrics": [r], "together_days": None})
+    for members in groups.values():
+        members.sort(key=lambda r: (r["code"] != a, r["first_day"]))
+        days_a = {d for r in members if r["code"] == a for d, _ in r["values"]}
+        days_b = {d for r in members if r["code"] == b for d, _ in r["values"]}
+        together = len(days_a & days_b) if days_a and days_b else None
+        findings.append({"metrics": members, "together_days": together})
+    findings += [{"metrics": [r], "together_days": None} for r in runs if r["code"] not in (a, b)]
     out = []
     for f in findings:
         first, last = _span(f["metrics"])

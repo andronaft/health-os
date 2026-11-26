@@ -1,6 +1,6 @@
 // The words of the Vitals page's "Worth checking" list (#75), in English, Ukrainian and Spanish.
 // Neutral by rule: a lasting change from your own usual is worth a look, never an alarm, and an
-// empty list never says that everything is normal. A plural key has _one/_few/_many/_other forms,
+// empty list never claims all is fine. A plural key has _one/_few/_many/_other forms,
 // picked with Intl.PluralRules, falling back to the bare key's _other.
 
 export const SUSTAINED_LANGS = ["en", "uk", "es"];

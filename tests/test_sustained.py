@@ -126,6 +126,14 @@ def test_runs_on_different_days_stay_apart():
     assert all(f["together_days"] is None for f in findings)
 
 
+def test_one_long_hrv_run_across_two_resting_hr_runs_is_one_finding():
+    rhr = with_days(history(58), {9: 66, 8: 67, 7: 66, 4: 66, 3: 67, 2: 66})
+    hrv = with_days(history(45, wobble=3), {ago: 30 for ago in range(10)})
+    [finding] = pair_runs(daily_runs("resting_hr", rhr) + daily_runs("hrv", hrv))
+    assert [m["code"] for m in finding["metrics"]] == ["resting_hr", "resting_hr", "hrv"]
+    assert finding["together_days"] == 6 and finding["days"] == 10
+
+
 def test_findings_that_ended_before_the_window_are_left_out():
     rhr = with_days(history(58), {30: 66, 29: 67, 28: 66})
     assert sustained_days({"resting_hr": rhr}, since=TODAY - timedelta(days=7), tz=UTCZ) == []

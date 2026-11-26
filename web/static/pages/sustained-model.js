@@ -107,7 +107,10 @@ export function shadedRuns(sustained, panels) {
  * the markArea on that panel's axes. The option's own series are left as they are.
  */
 export function withShading(option, sustained, panels, { colors, lang = "en", bucket = "day" }) {
-  const runs = shadedRuns(sustained, panels);
+  // a run that began before the window is shaded from the window's first day, as BP diaries are
+  const start = option.xAxis?.[0]?.min ?? -Infinity;
+  const runs = shadedRuns(sustained, panels).filter((run) => run.to > start)
+    .map((run) => ({ ...run, from: Math.max(run.from, start) }));
   if (!runs.length) return option;
   const { t } = sustainedTranslator(lang);
   const byPanel = new Map();
