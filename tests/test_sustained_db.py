@@ -81,14 +81,19 @@ def test_the_demo_episode_is_found_and_reported_together(conn, get, today):
     first, last = max(WEARABLE_EPISODE), min(WEARABLE_EPISODE)
     assert finding["first_day"] == (today - timedelta(days=first)).isoformat()
     assert finding["last_day"] == (today - timedelta(days=last)).isoformat()
-    assert finding["together_days"] == 3 and finding["context"] == []
+    assert finding["together_days"] == 3
+    episode = (date.fromisoformat(finding["first_day"]), date.fromisoformat(finding["last_day"]))
+    assert finding["context"] == [  # the demo's workouts on those days, if any fell there
+        {"kind": "workout", "day": at.date().isoformat(), "type": kind, "minutes": minutes}
+        for at, kind, minutes in demo_workouts(today) if episode[0] <= at.date() <= episode[1]]
     assert get("?days=7&tz=UTC")["sustained"]["findings"] == []  # it ended before the window
     assert get("?days=365&tz=UTC")["sustained"]["findings"] == [finding]  # once, not once a week
 
 
 def test_no_watch_data_finds_nothing_and_checks_nothing(conn, user_id, get):
     lasting = get()["sustained"]
-    assert lasting["findings"] == [] and lasting["days_with_values"] == {"resting_hr": 0, "hrv": 0}
+    assert lasting["findings"] == []
+    assert lasting["days_with_values"] == {"resting_hr": 0, "hrv": 0, "hrv_sdnn": 0}
 
 
 def test_the_days_are_the_users(conn, user_id, get, today):

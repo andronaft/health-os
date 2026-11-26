@@ -91,7 +91,7 @@ def import_apple_health(conn, user_id: str, xml: str, alerter=None) -> dict:
             text(
                 """INSERT INTO physical_activities (user_id, activity_date, activity_type,
                        duration_minutes, external_id, raw_data, source_id)
-                   SELECT :u, :start, :type, :minutes, :ext,
+                   SELECT :u, :start, :type, :minutes, CAST(:ext AS varchar),
                           jsonb_build_object('end', CAST(:end AS text), 'source', CAST(:src AS text)),
                           :sid
                    WHERE NOT EXISTS (
