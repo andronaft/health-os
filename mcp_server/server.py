@@ -247,7 +247,16 @@ def get_anomalies(type_code: str = "", days: int = 90, z_threshold: float = 2.0)
     to 90 previous values) and lists those beyond z_threshold (default 2), largest first. Skips
     markers with fewer than 5 earlier values. Useful for wearables (HRV, resting HR, sleep) and
     long lab histories. type_code: limit to one marker. A deviation from the user's own history
-    is not a diagnosis — present it as "worth repeating / discussing", never as alarming."""
+    is not a diagnosis — present it as "worth repeating / discussing", never as alarming.
+
+    `sustained`: wearable changes that LASTED, ending in the last `days` — resting HR up or HRV
+    down 3+ days in a row against the median and spread of the 60 days before (reported
+    together when they share days), and heart rate 30+ bpm above the resting median for 20+
+    minutes with no steps and no workout (Apple Health raw samples only). Context (a workout
+    those days, a current beta blocker) is listed; it doesn't change the rule. Thresholds are
+    initial defaults, to be reviewed. Present these as "worth checking", never as alarming. What
+    the rule can't see: no ECG, wrist sensors only; days and minutes when the watch was off are
+    gaps, not normal days; fewer than 30 days of values in the 60 before → nothing is checked."""
     return tools.get_anomalies(type_code, days, z_threshold)
 
 

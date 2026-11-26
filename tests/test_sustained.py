@@ -240,3 +240,13 @@ def test_resting_medians_come_from_the_days_before():
 def test_the_limits_are_spelled_out():
     text = limits_text(DEFAULTS)
     assert "No ECG" in text and "wrist" in text and "watch was off" in text and "30 days" in text
+
+
+def test_the_tool_description_says_what_the_rule_cant_see():
+    import asyncio
+
+    from mcp_server.server import mcp
+
+    tool = next(t for t in asyncio.run(mcp.list_tools()) if t.name == "get_anomalies")
+    for words in ("no ECG", "wrist sensors only", "watch was off", "worth checking", "initial defaults"):
+        assert words in tool.description, words
