@@ -36,11 +36,11 @@ from web.record import diagnoses as read_diagnoses
 from web.record import habits as read_habits
 from web.record import medications as read_medications
 from web.record import timeline as read_timeline
-from web.report import parse_since, parse_tz
+from web.report import parse_since
 from web.report import report as read_report
 from web.review import review_queue
-from web.vitals import parse_tz as parse_vitals_tz
 from web.vitals import vitals as read_vitals
+from web.zones import parse_tz
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "web" / "static"
@@ -214,7 +214,7 @@ def vitals(request):
     """?days= the window; ?tz= the browser's zone, in which days and morning/evening are read."""
     days = request.query_params.get("days")
     try:
-        tz = parse_vitals_tz(request.query_params.get("tz"))
+        tz = parse_tz(request.query_params.get("tz"))
     except ValueError:
         return JSONResponse({"error": "tz must be a time zone name, e.g. Europe/Madrid"},
                             status_code=400)

@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import math
 from datetime import date, timedelta, tzinfo
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import text
 
@@ -29,6 +28,7 @@ from analytics import rcv
 from core import queries as q
 from core.health_summary import read_facts
 from safety.critical_values import LANGUAGES
+from web.zones import parse_tz  # noqa: F401  (re-exported for callers of this module)
 
 DEFAULT_SINCE_DAYS = 182      # no visit on record: the last six months
 TREND_CHARTS = 4
@@ -51,15 +51,6 @@ def parse_since(value: str | None) -> date | None:
     return date.fromisoformat(value)
 
 
-def parse_tz(value: str | None) -> tzinfo | None:
-    """The `tz` query parameter: an IANA zone name ("Europe/Madrid") or nothing (this machine's
-    zone). ValueError for anything else."""
-    if not value:
-        return None
-    try:
-        return ZoneInfo(value)
-    except (ZoneInfoNotFoundError, ValueError) as e:
-        raise ValueError(f"unknown time zone {value!r}") from e
 
 
 def _value(r) -> dict:
