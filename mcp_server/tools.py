@@ -499,6 +499,24 @@ def check_medication_safety(paracetamol_products: list[dict] | None = None,
                       default=str, ensure_ascii=False)
 
 
+def get_emergency_packet(layout: str = "lock_screen", lang: str = "en") -> str:
+    """The emergency packet (#74) for the lock screen or an NFC tag, from approved data only."""
+    from core.emergency import LAYOUTS, build, render_text
+
+    if layout not in LAYOUTS:
+        return json.dumps({"error": f"layout must be one of {', '.join(LAYOUTS)}"})
+    # main login in a read-only transaction: user_profile is not exposed to the readonly role
+    with rw_engine.connect() as conn:
+        conn.execute(text("SET TRANSACTION READ ONLY"))
+        packet = build(conn, lang)
+    out = {"layout": layout, "lang": packet["lang"], "as_of": packet["as_of"],
+           "empty": packet["empty"], "text": render_text(packet, layout),
+           "notice": packet["notice"], "privacy": packet["privacy"]}
+    if not packet["empty"]:
+        out[layout] = packet[layout]
+    return json.dumps(out, default=str, ensure_ascii=False)
+
+
 def crisis_resources(message: str = "") -> str:
     """Fixed crisis response (no model judgement, works offline). Includes the user's trusted
     contact from the profile, if set."""
