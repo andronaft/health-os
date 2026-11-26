@@ -31,6 +31,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   so a new page is covered without being listed. Tooltips are put aside while it is on; prints are
   never blurred. The critical-values alert stays visible with only its value blurred. Remembered in
   this browser.
+- Browser UI: "where does this value come from". A click on, or Enter on, any lab value (the
+  Labs table, the panel matrix, a marker's values table and chart points, the Overview tables)
+  opens a drawer (a bottom sheet on a phone) for that one observation: the value as printed on
+  the form and the canonical value it was converted to, with the factor, or plainly "not
+  converted"; the range and where it came from (the form, or none on it — the catalog's general
+  range is shown apart, as a hint no status came from); the review status, how it came in and
+  when it was approved; the notes verbatim; the document and the panel, with the panel's other
+  values. A pending value says it is not a fact yet. New endpoint `GET /api/v1/observations/{id}`
+  (only the user's own live rows; anything else is 404).
+- Browser UI: a range bar (#64) beside each value in the Labs and Overview tables and in the
+  drawer: below / inside / above the form's range, an open side for a missing min or max, an
+  arrow for a value far off the bar or a limit like ">600" (above only when the limit itself is
+  past the range). Its words are in an accessible label; light, dark and print.
 - Browser UI: the medical-record pages (#57). **Timeline**: the whole record on one axis, in
   lanes (diagnoses; visits, procedures and hospital stays; lab panels; vaccinations; documents),
   with medications and habits drawn as bars from start to stop (to today while ongoing). A

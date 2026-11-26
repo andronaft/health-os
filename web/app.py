@@ -32,6 +32,7 @@ from core.db import engine
 from core.emergency import build as read_emergency
 from web.food import food_page
 from web.labs import lab_index, lab_marker
+from web.observation import observation as read_observation
 from web.overview import overview as read_overview
 from web.record import diagnoses as read_diagnoses
 from web.record import habits as read_habits
@@ -238,6 +239,12 @@ def emergency(request):
     return _read(request, lambda conn, lang: read_emergency(conn, lang, tz))
 
 
+# where a value comes from: the drawer (#64 and round 2)
+def observation(request):
+    return _read(request, lambda conn, lang: read_observation(
+        conn, request.path_params["id"], lang))
+
+
 def create_app(token: str) -> Starlette:
     if not token:
         raise ValueError("a session token is required")
@@ -257,6 +264,8 @@ def create_app(token: str) -> Starlette:
         Route("/api/v1/habits", habits, methods=["GET"]),
         Route("/api/v1/report", report, methods=["GET"]),
         Route("/api/v1/emergency", emergency, methods=["GET"]),  # the emergency packet (#74)
+        # where a value comes from: the drawer
+        Route("/api/v1/observations/{id}", observation, methods=["GET"]),
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]
     return Starlette(routes=routes, middleware=[
