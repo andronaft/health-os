@@ -4,7 +4,7 @@ pending value says it is pending. The endpoint runs on the test's own connection
 stays in its rolled-back transaction. Made-up values only."""
 import contextlib
 import uuid
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from sqlalchemy import text
@@ -12,7 +12,12 @@ from starlette.testclient import TestClient
 
 import web.app
 from core import queries as q
-from core.services import approve_staged, ingest_observation, stage_panel
+from core.services import (
+    approve_staged,
+    ingest_observation,
+    map_pending_observation,
+    stage_panel,
+)
 
 HEADERS = {"X-Health-OS-Token": "t"}
 
@@ -75,7 +80,8 @@ def test_an_approved_value_with_its_conversion_range_review_and_panel(conn, user
     assert data["range"]["canonical"]["max"] == pytest.approx(100 * conv["factor"], rel=1e-4)
     assert data["range"]["defaults"] == []  # the form has one: no catalog hint
     assert data["review"]["status"] == "approved" and data["review"]["channel"] == "mcp"
-    assert data["review"]["reviewed_by"] == "human" and data["review"]["reviewed_at"]
+    assert data["review"]["reviewed_by"] == "human" and data["review"]["approved_at"]
+    assert data["review"]["source_reviewed_at"]
     assert data["panel"]["facility"] == "Test Lab" and data["panel"]["type"] == "Biochemistry"
     assert data["panel"]["rows_in_document"] == 3
     others = {o["code"]: o for o in data["panel"]["others"]}
@@ -89,10 +95,11 @@ def test_a_pending_value_says_so_and_has_no_review_date(conn, user_id, get):
     staged = _panel(conn, user_id, ROWS[1:2], approve=False)
     oid = _id(conn, staged["panel_id"], "ALT")
     # another source of the same user was approved: its date must not pass for this value's
-    assert get(f"observations/{_id(conn, first['panel_id'], 'Glucose')}")["review"]["reviewed_at"]
+    assert get(f"observations/{_id(conn, first['panel_id'], 'Glucose')}")["review"]["approved_at"]
     data = get(f"observations/{oid}")
     assert data["pending"] is True and data["review"]["status"] == "pending"
-    assert data["review"]["reviewed_at"] is None and data["review"]["reviewed_by"] is None
+    assert data["review"]["approved_at"] is None and data["review"]["reviewed_by"] is None
+    assert data["review"]["source_reviewed_at"] is None
     assert data["status"] == "normal"  # the form's word, sent; the page says it isn't a fact
 
 
@@ -103,7 +110,7 @@ def test_a_pending_value_of_a_partly_approved_source_has_no_review_date(conn, us
     data = get(f"observations/{_id(conn, staged['panel_id'], 'Zqxwy factor')}")
     assert data["pending"] is True and data["unmapped"] is True and data["code"] is None
     assert data["name"] == "Zqxwy factor"
-    assert data["review"]["reviewed_at"] is None
+    assert data["review"]["approved_at"] is None and data["review"]["source_reviewed_at"] is None
     assert data["canonical"]["state"] == "not_converted"
     # and the panel lists the approved one next to it
     assert [o["code"] for o in data["panel"]["others"]] == ["glucose"]
@@ -136,7 +143,8 @@ def test_no_range_on_the_form_sends_the_catalog_default_as_a_hint(conn, user_id,
     assert data["status"] is None  # no range, no status: a default never made one
     defaults = data["range"]["defaults"]
     assert [(d["sex"], d["min"], d["max"]) for d in defaults] == [("female", 120, 155)]
-    assert data["review"]["status"] == "approved" and data["review"]["reviewed_at"] is None
+    assert data["review"]["status"] == "approved" and data["review"]["approved_at"] is None
+    assert data["review"]["source_reviewed_at"] is None  # stored approved: no review recorded
 
 
 def test_notes_and_the_document_are_sent_as_stored(conn, user_id, get):
@@ -195,3 +203,38 @@ def test_the_pages_send_the_ids_the_drawer_opens(conn, user_id, get):
     overview = get("overview")
     assert {r["id"] for r in overview["attention"]["pending"]["rows"]} == {
         _id(conn, pending["panel_id"], "Glucose")}
+
+
+def test_a_later_approval_of_the_source_does_not_redate_an_approved_row(conn, user_id, get):
+    """approve_staged sets the source's reviewed_at on every approval: a row approved in July
+    must not read as approved in September after another row of its panel was mapped then."""
+    staged = _panel(conn, user_id, [ROWS[0], {"raw_name": "Zqxwy factor", "value": 3,
+                                             "unit": "U/L", "ref_min": 1, "ref_max": 5}])
+    glucose = _id(conn, staged["panel_id"], "Glucose")
+    july = datetime(2026, 7, 1, 9, tzinfo=UTC)
+    conn.execute(text("UPDATE observation_history SET changed_at=:t WHERE observation_id=:id"),
+                 {"t": july, "id": glucose})
+    unmapped = _id(conn, staged["panel_id"], "Zqxwy factor")
+    assert "error" not in map_pending_observation(conn, user_id, unmapped, "alt",
+                                                  learn_synonym=False)
+    assert approve_staged(conn, user_id, staged["source_id"])["approved_observations"] == 1
+    conn.execute(text("UPDATE ingestion_sources SET reviewed_at=:t WHERE id=:s"),
+                 {"t": datetime(2026, 9, 15, 9, tzinfo=UTC), "s": staged["source_id"]})
+    review = get(f"observations/{glucose}")["review"]
+    assert review["approved_at"].startswith("2026-07-01")
+    assert review["source_reviewed_at"].startswith("2026-09-15")
+    # an edit after approval (a note) is not a new approval
+    conn.execute(text("UPDATE observations SET notes='x' WHERE id=:id"), {"id": glucose})
+    assert get(f"observations/{glucose}")["review"]["approved_at"].startswith("2026-07-01")
+    # the mapped row was approved by the second approval, not the first
+    assert not get(f"observations/{unmapped}")["review"]["approved_at"].startswith("2026-07-01")
+
+
+def test_a_pending_limit_keeps_its_comparator_on_the_marker_page(conn, user_id, get):
+    _panel(conn, user_id, [{"raw_name": "Glucose", "value": 5, "unit": "mmol/L",
+                            "ref_min": 3.9, "ref_max": 5.6}], days_ago=30)
+    _panel(conn, user_id, [{"raw_name": "Glucose", "value": 10, "comparator": "<",
+                            "unit": "mmol/L", "ref_min": 3.9, "ref_max": 5.6}],
+           days_ago=1, approve=False)
+    (pending,) = get("labs/glucose")["pending"]
+    assert pending["original"]["comparator"] == "<" and pending["original"]["value"] == 10

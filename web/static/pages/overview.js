@@ -89,7 +89,7 @@ function pendingPart({ total, rows }) {
         key: "value",
         label: t("overview.col.value"),
         numeric: true,
-        render: (row) => valueCell({ ...row, pending: true }),
+        render: (row) => valueCell(row, { pending: true }),
         text: formatValue,
       },
       { key: "status", label: t("overview.col.status"), sortable: false, value: () => t("status.pending"), render: () => statusPill("pending") },

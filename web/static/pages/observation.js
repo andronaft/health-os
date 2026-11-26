@@ -8,7 +8,7 @@ import { ApiError, api, explain } from "../api.js";
 import { el, errorState, formatValue, statusPill, statusWord } from "../components.js";
 import { LANG, t } from "../strings.js";
 import {
-  atText, canonicalRangeText, conversionText, defaultRangeText, documentText, panelText, printedText,
+  atText, canonicalRangeText, rangeStatusText, valueCellView, conversionText, defaultRangeText, documentText, panelText, printedText,
   rangeText, reviewLines,
 } from "./observation-model.js";
 import { rangeBarElement } from "./range-bar.js";
@@ -105,7 +105,7 @@ function content(data) {
     part(t("obs.range.title"),
       line(rangeText(data)),
       line(canonicalRange, "quiet"),
-      data.range.source === "none" && line(t("obs.range.no_status"), "quiet"),
+      line(rangeStatusText(data), "quiet"),
       data.range.defaults.length > 0 && el("div", {},
         el("p", {}, t("obs.range.defaults")),
         el("ul", { class: "plain" }, ...data.range.defaults.map((d) => el("li", {}, defaultRangeText(d)))))),
@@ -167,7 +167,12 @@ export function valueButton(id, content, { label } = {}) {
   }, content);
 }
 
-/** A table cell's value as a drawer button, and the range bar after it. */
-export const valueCell = (row, text = formatValue(row)) =>
-  valueButton(row.id, el("span", { class: row.pending ? "value-pending" : null }, text || "—"),
-    { label: t("obs.open_value", { value: text || "—", name: row.name ?? "" }).trim() });
+/**
+ * A table cell's value as a drawer button. Pending only when the caller says so: a row's own
+ * `pending` field may be something else (the Labs index sends a count of queued values there).
+ */
+export function valueCell(row, { pending = false } = {}) {
+  const view = valueCellView(row, { pending });
+  return valueButton(row.id, el("span", { class: view.pending ? "value-pending" : null }, view.text),
+    { label: view.label });
+}

@@ -222,8 +222,9 @@ async function renderMarker(view, code) {
   const meta = [specimenWord(data.specimen), data.unit && t("labs.detail.unit", { unit: data.unit }),
     data.loinc && `LOINC ${data.loinc}`].filter(Boolean).join(" · ");
 
-  const chartBox = numeric.length || numericPending.length ? el("div", { class: "labs-chart" }) : null;
-  const textBox = texts ? el("div", { class: "labs-chart labs-chart-text" }) : null;
+  // focusable by script only: closing a drawer opened from a point gives the focus back here
+  const chartBox = numeric.length || numericPending.length ? el("div", { class: "labs-chart", tabindex: "-1" }) : null;
+  const textBox = texts ? el("div", { class: "labs-chart labs-chart-text", tabindex: "-1" }) : null;
   const toggle = el("input", { type: "checkbox", disabled: true });
   const hasBaseline = data.baseline.mean !== null && data.baseline.mean !== undefined;
 

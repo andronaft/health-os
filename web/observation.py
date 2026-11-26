@@ -114,7 +114,13 @@ def observation(conn, observation_id: str, lang: str = "en") -> dict | None:
                   p.panel_date, p.panel_type, p.row_count_in_document, p.rows_extracted,
                   f.name AS facility,
                   d.id::text AS document_id, d.title AS document_title,
-                  d.document_date, d.doc_type
+                  d.document_date, d.doc_type,
+                  -- the row's own approval: observation_history keeps the row as it was before
+                  -- each update, so the latest entry that wasn't approved yet is the update that
+                  -- approved it. The source's reviewed_at moves on every later approval of it.
+                  (SELECT max(h.changed_at) FROM observation_history h
+                    WHERE h.observation_id = o.id
+                      AND h.old_row->>'review_status' IS DISTINCT FROM 'approved') AS approved_at
            FROM observations o
            LEFT JOIN observation_types ot ON ot.id = o.type_id
            JOIN ingestion_sources s ON s.id = o.source_id
@@ -162,9 +168,12 @@ def observation(conn, observation_id: str, lang: str = "en") -> dict | None:
             "status": row["review_status"],
             "channel": row["channel"],
             "staged_at": row["staged_at"],
-            # the source's approval date stands for this value only once it is approved itself:
-            # a source keeps it while some of its rows still wait
-            "reviewed_at": row["reviewed_at"] if approved else None,
+            # when this row was approved (from its history); None for a row stored approved
+            "approved_at": row["approved_at"] if approved else None,
+            # when its source was last approved: a later approval of the same source (a row
+            # mapped afterwards) moves it, so it is said as the source's, never as this row's.
+            # Nothing for a pending row: a source keeps the date while some of its rows wait
+            "source_reviewed_at": row["reviewed_at"] if approved else None,
             "reviewed_by": row["reviewed_by"] if approved else None,
         },
         "notes": row["notes"],

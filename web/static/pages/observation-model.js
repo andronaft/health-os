@@ -45,6 +45,16 @@ export function rangeText({ range }) {
   return t("obs.range.form", { range: range.unit ? `${shown} ${range.unit}` : shown });
 }
 
+/**
+ * What the status rests on when the form gave no range: nothing (no status), or for a critical
+ * value the critical threshold. "" when the form has a range: the status is the range's.
+ */
+export function rangeStatusText({ range, status }) {
+  if (range.source === "form") return "";
+  if (status === null || status === undefined) return t("obs.range.no_status");
+  return status === "critical" ? t("obs.range.critical_status") : t("obs.range.other_status");
+}
+
 /** The same range in the canonical unit, when it differs from the form's; "" when there is none. */
 export function canonicalRangeText({ range, canonical, printed }) {
   const band = range.canonical;
@@ -76,9 +86,14 @@ export function reviewLines({ review, pending }) {
   if (review.staged_at) lines.push(t("obs.review.staged", { date: formatDate(review.staged_at) }));
   if (pending) {
     lines.push(t("obs.review.not_yet"));
-  } else if (review.reviewed_at) {
+  } else if (review.approved_at) {
     const by = review.reviewed_by === "human" ? t("obs.review.by_you") : review.reviewed_by;
-    lines.push(t("obs.review.reviewed", { date: formatDate(review.reviewed_at), by: by ?? "—" }));
+    lines.push(by
+      ? t("obs.review.reviewed", { date: formatDate(review.approved_at), by })
+      : t("obs.review.approved_on", { date: formatDate(review.approved_at) }));
+  } else if (review.source_reviewed_at) {
+    // not this row's own date: the source's last approval, which a later one moves
+    lines.push(t("obs.review.source_reviewed", { date: formatDate(review.source_reviewed_at) }));
   } else {
     lines.push(t("obs.review.no_review"));
   }
@@ -98,6 +113,12 @@ export function panelText(panel) {
     ? t("obs.panel.rows", { n: panel.rows_in_document })
     : null;
   return [formatDate(panel.date), panel.type, panel.facility, rows].filter(Boolean).join(" · ");
+}
+
+/** What a value cell shows and says; pending only when the caller says so (see valueCell). */
+export function valueCellView(row, { pending = false } = {}) {
+  const text = formatValue(row) || "—";
+  return { text, pending: pending === true, label: t("obs.open_value", { value: text, name: row.name ?? "" }).trim() };
 }
 
 /** The heading's date: a form's date has no time of day, so none is invented. */

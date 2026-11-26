@@ -190,8 +190,8 @@ def lab_marker(conn, code: str, lang: str = "en") -> dict | None:
 
     approved = q.series(conn, uid, code)["points"] if uid else []
     pending = conn.execute(text(
-        """SELECT id::text AS id, effective_at, value_numeric, value_text, unit, value_canonical,
-                  ref_min, ref_max, status
+        """SELECT id::text AS id, effective_at, value_numeric, comparator, value_text, unit,
+                  value_canonical, ref_min, ref_max, status
            FROM v_observations_pending WHERE user_id = :u AND type_code = :c
            ORDER BY effective_at"""), {"u": uid, "c": code}).mappings().all() if uid else []
 
@@ -211,7 +211,8 @@ def lab_marker(conn, code: str, lang: str = "en") -> dict | None:
         "specimen": kind["specimen"],
         "loinc": kind["loinc_code"],
         "points": [point(p, False) for p in approved],
-        "pending": [point({**p, "comparator": None}, True) for p in pending],
+        # with its comparator: a pending "<10" is a limit, not 10 (the view has it since 0016)
+        "pending": [point(p, True) for p in pending],
         "trend": trend,
         "baseline": {
             "n": len(values), "min_n": BASELINE_MIN, "sigmas": BASELINE_SIGMAS,

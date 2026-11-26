@@ -1710,6 +1710,11 @@ tbody tr:last-child td {
   border-bottom: 1px solid var(--border);
 }
 
+/* focused by the script on open, for screen readers: no ring around a heading */
+.obs-head h2:focus {
+  outline: none;
+}
+
 .obs-head h2 {
   margin: 0;
   font-size: 1.125rem;

@@ -410,7 +410,8 @@ test("counts read as one or many", () => {
 // ---- where a value comes from (the drawer) and the range bar (#64) ----------------------------
 import { BAND_FROM, BAND_TO, rangeBar, rangePosition, trackDomain } from "../web/static/pages/range-model.js";
 import {
-  canonicalRangeText, conversionText, defaultRangeText, documentText, panelText, rangeText, reviewLines,
+  canonicalRangeText, conversionText, defaultRangeText, documentText, panelText, rangeStatusText, rangeText,
+  reviewLines, valueCellView,
 } from "../web/static/pages/observation-model.js";
 
 test("the range bar: below, inside, above, with the range in the middle of the track", () => {
@@ -517,16 +518,41 @@ test("the drawer says where the range came from; a default is only a hint", () =
 });
 
 test("the drawer's review lines: a pending value is never dated as reviewed", () => {
-  const review = { status: "pending", channel: "mcp", staged_at: "2026-11-20T10:00:00+00:00", reviewed_at: null, reviewed_by: null };
+  const review = { status: "pending", channel: "mcp", staged_at: "2026-11-20T10:00:00+00:00", approved_at: null, source_reviewed_at: null, reviewed_by: null };
   assert.deepEqual(reviewLines({ review, pending: true }), [
     "Review status: pending", "Came in by: the assistant, from a form", "Recorded on 2026-11-20", "Not reviewed yet."]);
   // even if a date slipped through, a pending value says it is not reviewed
-  assert.equal(reviewLines({ review: { ...review, reviewed_at: "2026-11-21" }, pending: true }).at(-1), "Not reviewed yet.");
-  assert.equal(reviewLines({ review: { ...review, status: "approved", reviewed_at: "2026-11-21T09:00:00+00:00", reviewed_by: "human" }, pending: false }).at(-1),
+  assert.equal(reviewLines({ review: { ...review, approved_at: "2026-11-21", source_reviewed_at: "2026-11-21" }, pending: true }).at(-1), "Not reviewed yet.");
+  // the row's own approval date, not the source's later one
+  assert.equal(reviewLines({ review: { ...review, status: "approved", approved_at: "2026-07-01T09:00:00+00:00", source_reviewed_at: "2026-09-15T09:00:00+00:00", reviewed_by: "human" }, pending: false }).at(-1),
+    "Approved on 2026-07-01 by you");
+  // no history of its own: the source's date, said as the source's
+  assert.equal(reviewLines({ review: { ...review, status: "approved", source_reviewed_at: "2026-09-15T09:00:00+00:00", reviewed_by: "human" }, pending: false }).at(-1),
+    "Approved; its source was last approved on 2026-09-15");
+  assert.equal(reviewLines({ review: { ...review, status: "approved", approved_at: "2026-11-21T09:00:00+00:00", reviewed_by: "human" }, pending: false }).at(-1),
     "Approved on 2026-11-21 by you");
-  assert.equal(reviewLines({ review: { status: "approved", channel: "manual", staged_at: null, reviewed_at: null }, pending: false }).at(-1),
+  assert.equal(reviewLines({ review: { status: "approved", channel: "manual", staged_at: null, approved_at: null, source_reviewed_at: null }, pending: false }).at(-1),
     "No separate review recorded: it was stored as approved.");
   assert.equal(reviewLines({ review: { status: "weird", channel: "fax" }, pending: true })[0], "Review status: weird");
+});
+
+test("a value cell is pending only when the caller says so, never from a row's count", () => {
+  // the Labs index sends the number of queued values in `pending`: the latest value is approved
+  const marker = { id: "o1", name: "Vitamin D 25-OH", value: 22, unit: "ng/mL", pending: 2 };
+  assert.equal(valueCellView(marker).pending, false);
+  assert.equal(valueCellView({ ...marker, pending: true }).pending, false);
+  assert.equal(valueCellView(marker, { pending: true }).pending, true);
+  assert.equal(valueCellView(marker, { pending: 2 }).pending, false);
+  assert.equal(valueCellView(marker).label, "22 ng/mL Vitamin D 25-OH: where it comes from");
+  assert.equal(valueCellView({ value: null, text: null }).text, "—");
+});
+
+test("without a range on the form the drawer says what the status rests on", () => {
+  assert.equal(rangeStatusText({ range: { source: "none" }, status: null }),
+    "Without a range on the form, no status was computed for this value.");
+  // a critical value with no range: its status is the threshold's, never "no status"
+  assert.match(rangeStatusText({ range: { source: "none" }, status: "critical" }), /critical-value threshold/);
+  assert.equal(rangeStatusText({ range: { source: "form" }, status: "high" }), "");
 });
 
 test("the drawer's source lines", () => {
