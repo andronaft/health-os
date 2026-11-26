@@ -228,6 +228,9 @@ def bp_dated(today: date) -> list[tuple[date, int, int]]:
 WEARABLE_DAYS = 365
 # days without the watch: a week on holiday and a few scattered days
 WEARABLE_GAPS = set(range(130, 139)) | {12, 47, 88, 201, 260, 300}
+# a lasting change from the usual (#75), as a cold might bring: days ago → (resting HR up in bpm,
+# HRV down in ms). Four days of both, with HRV back a day earlier.
+WEARABLE_EPISODE = {23: (7, 13), 22: (9, 15), 21: (8, 12), 20: (6, 0)}
 
 
 def wearable_days(today: date) -> list[tuple[date, dict[str, float]]]:
@@ -259,6 +262,10 @@ def wearable_days(today: date) -> list[tuple[date, dict[str, float]]]:
             "body_battery_low": max(5, min(60, round(22 + 10 * _noise(ago, 12)))),
             "intensity_minutes": max(0, round(25 + 20 * season + 30 * _noise(ago, 13))),
         }
+        if ago in WEARABLE_EPISODE:
+            up, down = WEARABLE_EPISODE[ago]
+            values["resting_hr"] += up
+            values["hrv"] -= down
         if day.weekday() == 0:  # the watch re-estimates VO2max about once a week
             values["vo2max"] = round(38 + 3 * fit + 0.6 * _noise(ago, 14), 1)
         out.append((day, values))

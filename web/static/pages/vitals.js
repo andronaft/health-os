@@ -8,6 +8,8 @@ import {
   bpKey, bpOption, diaryState, diaryView, heatmapOption, heatmapSummary, panelTitle, pressure, readoutAt,
   wearableHeight, wearableOption, wearablePanels, windowLinks,
 } from "./vitals-model.js";
+import { findingView, sustainedEmpty, sustainedFootnote, sustainedState, withShading } from "./sustained-model.js";
+import { sustainedTranslator } from "./sustained-strings.js";
 
 const section = (title, ...children) =>
   el("section", { class: "vitals-section" }, el("h2", {}, title), ...children);
@@ -102,6 +104,25 @@ function bpSection(bp, window, charts) {
     protocolNote(bp.protocol));
 }
 
+// sustained deviations (#75): a short list above the charts; their days are shaded on them
+function sustainedList(sustained) {
+  const state = sustainedState(sustained);
+  if (state === "none") return null;
+  const { t } = sustainedTranslator(LANG);
+  const items = sustained.findings.map((finding) => {
+    const view = findingView(finding, LANG);
+    return el("li", { class: "sustained-item", "data-kind": view.kind },
+      el("p", { class: "sustained-head" }, el("strong", {}, view.title), " ", el("span", { class: "quiet" }, view.period)),
+      ...view.lines.map((line) => el("p", {}, line)),
+      view.chips.length ? el("p", { class: "sustained-chips" }, ...view.chips.map((chip) => el("span", { class: "sustained-chip" }, chip))) : null);
+  });
+  return el("section", { class: "card sustained", "aria-labelledby": "sustained-title" },
+    el("h3", { id: "sustained-title" }, t("title")),
+    el("p", { class: "quiet" }, t("note")),
+    items.length ? el("ul", { class: "plain sustained-list" }, ...items) : el("p", {}, sustainedEmpty(sustained, LANG)),
+    el("p", { class: "quiet footnote" }, sustainedFootnote(sustained, LANG)));
+}
+
 function wearableSection(data, charts) {
   const title = t("vitals.watch.title");
   const panels = wearablePanels(data.wearables, data.load);
@@ -109,10 +130,11 @@ function wearableSection(data, charts) {
   const chart = el("div", { class: "vitals-watch-chart" });
   chart.dataset.panels = String(panels.length);
   const readout = el("div", { class: "vitals-readout", "aria-live": "polite" });
-  charts.push({ kind: "watch", element: chart, panels, readout });
+  charts.push({ kind: "watch", element: chart, panels, readout, sustained: data.sustained });
   const missing = data.wearables.length ? null : t("vitals.watch.only_load");
   return section(title,
     quiet(t("vitals.watch.note")),
+    sustainedList(data.sustained),
     missing && quiet(missing),
     readout,
     chart,
@@ -142,12 +164,15 @@ function chartColors(tokenColor) {
     c1: tokenColor("--chart-1"), c2: tokenColor("--chart-2"), c3: tokenColor("--chart-3"), c4: tokenColor("--chart-4"),
     area: withAlpha(tokenColor("--accent"), 0.08),
     low: tokenColor("--border"), high: tokenColor("--chart-1"), empty: tokenColor("--surface"), bg: tokenColor("--bg"),
+    sustained: withAlpha(tokenColor("--chart-4"), 0.18), sustainedEdge: withAlpha(tokenColor("--chart-4"), 0.5),
   };
 }
 
 function optionFor(chart, window, colors) {
   if (chart.kind === "bp") return bpOption(chart.bp, window, { colors });
-  if (chart.kind === "watch") return wearableOption(chart.panels, window, { colors });
+  if (chart.kind === "watch") {
+    return withShading(wearableOption(chart.panels, window, { colors }), chart.sustained, chart.panels, { colors, lang: LANG, bucket: window.bucket });
+  }
   return heatmapOption(chart.heatmap, { colors });
 }
 
