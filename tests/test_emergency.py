@@ -160,9 +160,30 @@ def test_ndef_size_counts_utf8_and_the_record_wrapping():
 def test_blood_type_joins_the_rh_factor():
     assert emergency.blood_type("A", "+") == "A+"
     assert emergency.blood_type("B+", "+") == "B+"
+    assert emergency.blood_type("B+", None) == "B+"
     assert emergency.blood_type("AB", "negative") == "AB-"
+    assert emergency.blood_type("AB−", "neg") == "AB-"
     assert emergency.blood_type("0", None) == "0"
     assert emergency.blood_type(None, "+") is None
+
+
+def test_a_blood_type_its_rh_contradicts_shows_the_conflict():
+    # which one is right is not for code to pick: both are printed, with a request to check
+    assert emergency.blood_type("A+", "-") == "A+, but Rh is recorded as -: check which is right"
+    assert emergency.blood_type("0-", "positive", "uk") == (
+        "0-, але резус записано як positive: перевірте, що правильно")
+    assert emergency.blood_type("B+", "weak D") == (
+        "B+, but Rh is recorded as weak D: check which is right")
+
+
+def test_a_diagnosis_without_verification_status_is_not_shown_as_confirmed(conn, patient):
+    did = add_diagnosis(conn, patient, "Gout", icd10_code="M10.9",
+                        diagnosed_at=TODAY - timedelta(days=5))
+    conn.execute(text("UPDATE diagnoses SET verification_status=NULL WHERE id=:d"), {"d": did})
+    fields = {f["key"]: f["text"] for f in build(conn, "en")["lock_screen"]["fields"]}
+    assert "Gout M10.9 (certainty not recorded)" in fields["conditions"].splitlines()
+    es = {f["key"]: f["text"] for f in build(conn, "es")["lock_screen"]["fields"]}
+    assert "Gout M10.9 (certeza no registrada)" in es["conditions"]
 
 
 def test_nothing_recorded_never_reads_as_none_known(conn, user_id):
@@ -207,6 +228,30 @@ def test_mcp_tool_returns_the_chosen_layout_as_text(conn, patient, monkeypatch):
     assert nfc["nfc"]["size"] == ndef_size(nfc["nfc"]["text"], "uk")
     assert "Amoxicillin" not in nfc["text"]
     assert "error" in json.loads(tools.get_emergency_packet("wallet", "en"))
+
+
+def test_mcp_as_of_is_the_day_in_health_os_tz(conn, patient, monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from core.config import settings
+
+    class Engine:
+        @contextlib.contextmanager
+        def connect(self):
+            yield _ReadOnlyProxy(conn)
+
+    monkeypatch.setattr(tools, "rw_engine", Engine())
+    # 25 hours apart: the two zones are never on the same day
+    for zone in ("Pacific/Kiritimati", "Pacific/Pago_Pago"):
+        monkeypatch.setattr(settings, "health_os_tz", zone)
+        out = json.loads(tools.get_emergency_packet("lock_screen", "en"))
+        now = conn.execute(text("SELECT now()")).scalar()
+        assert out["as_of"] == now.astimezone(ZoneInfo(zone)).date().isoformat()
+    assert datetime.now(ZoneInfo("Pacific/Kiritimati")).date() != datetime.now(
+        ZoneInfo("Pacific/Pago_Pago")).date()
+    monkeypatch.setattr(settings, "health_os_tz", "Mars/Base")
+    assert "HEALTH_OS_TZ" in json.loads(tools.get_emergency_packet("nfc", "en"))["error"]
 
 
 def test_api_endpoint(conn, patient, monkeypatch):

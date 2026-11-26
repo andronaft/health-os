@@ -7,7 +7,7 @@ import { api, explain } from "../api.js";
 import { el, errorState } from "../components.js";
 import { LANG, t } from "../strings.js";
 import { LANG_NAMES } from "./report-strings.js";
-import { LANG_KEY, PACKET_LANGS, cardSides, copyText, nfcBudget, packetLang } from "./emergency-model.js";
+import { LANG_KEY, PACKET_LANGS, cardSides, copyText, nfcBudget, packetLang, tallerThanCard } from "./emergency-model.js";
 import { browserZone } from "./report-model.js";
 
 function storage() {
@@ -79,7 +79,7 @@ function lockScreen(packet) {
   });
   return el("section", { class: "emergency-section" },
     el("h2", {}, t("emergency.lock.title")),
-    el("p", { class: "quiet" }, t("emergency.lock.lead")),
+    el("p", { class: "quiet public" }, t("emergency.lock.lead")),
     el("ul", { class: "emergency-fields" }, ...cards));
 }
 
@@ -118,7 +118,7 @@ function nfc(packet) {
   update();
   return el("section", { class: "emergency-section" },
     el("h2", {}, t("emergency.nfc.title")),
-    el("p", { class: "quiet" }, t("emergency.nfc.lead")),
+    el("p", { class: "quiet public" }, t("emergency.nfc.lead")),
     area,
     el("div", { class: "emergency-nfc-actions" }, copyButton(() => area.value, area, t("emergency.nfc.title")), reset),
     edited, size, tags,
@@ -138,21 +138,38 @@ function walletCard(packet) {
   const front = cardSide(packet, sides.front, el("p", { class: "wallet-title" }, el("span", { "aria-hidden": "true" }, "✚ "), packet.title));
   const back = cardSide(packet, sides.back, null);
   const card = el("div", { class: "wallet-card", lang: packet.lang }, front, back);
+  // a side that is too full grows (styles.css: never clipped); the warning is on screen and on paper
   const overflow = el("p", { class: "emergency-warning", hidden: true }, t("emergency.card.overflow"));
-  // a side taller than a card is printed taller, never cut: say so before printing
+  const printed = el("p", { class: "wallet-overflow-print", hidden: true }, t("emergency.card.overflow_print"));
+  const probe = el("div", { class: "wallet-probe", "aria-hidden": "true" });
+  const sheet = el("div", { class: "wallet-sheet" }, probe, card, printed);
+  const print = matchMedia("print");
   const check = () => {
-    if (!card.isConnected) return;
-    const tall = [front, back].some((side) => side.scrollHeight > side.clientHeight + 1);
+    if (!sheet.isConnected) {
+      // the page was left: stop listening
+      window.removeEventListener("beforeprint", check);
+      window.removeEventListener("resize", check);
+      print.removeEventListener("change", check);
+      return;
+    }
+    const tall = tallerThanCard([front, back].map((side) => side.getBoundingClientRect().height),
+      probe.getBoundingClientRect().height);
     card.dataset.overflow = String(tall);
     overflow.hidden = !tall;
+    printed.hidden = !tall;
   };
+  // measured again whenever the layout may change: fonts, window size, and the print layout itself
   requestAnimationFrame(check);
+  document.fonts?.ready.then(check);
+  window.addEventListener("beforeprint", check);
+  window.addEventListener("resize", check);
+  print.addEventListener("change", check);
   return el("section", { class: "emergency-section emergency-wallet" },
     el("h2", {}, t("emergency.card.title")),
-    el("p", { class: "quiet" }, t("emergency.card.lead")),
+    el("p", { class: "quiet public" }, t("emergency.card.lead")),
     el("button", { type: "button", class: "emergency-print", onclick: () => window.print() }, t("emergency.card.print")),
     overflow,
-    el("div", { class: "wallet-sheet" }, card));
+    sheet);
 }
 
 function controls(state, redraw) {
@@ -169,7 +186,7 @@ function controls(state, redraw) {
   }, ...PACKET_LANGS.map((code) => el("option", { value: code, lang: code, selected: code === state.lang }, LANG_NAMES[code])));
   return el("div", { class: "emergency-controls" },
     el("label", {}, t("emergency.language"), " ", select),
-    el("p", { class: "quiet" }, t("emergency.note")));
+    el("p", { class: "quiet public" }, t("emergency.note")));
 }
 
 function page(packet, state, redraw) {

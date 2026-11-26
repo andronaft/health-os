@@ -59,6 +59,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "verification.provisional": "provisional",
         "verification.suspected": "suspected",
         "verification.differential": "differential",
+        "verification.unknown": "certainty not recorded",
+        "blood.conflict": "{blood}, but Rh is recorded as {rh}: check which is right",
         "clinical.recurrence": "recurrence",
         "clinical.relapse": "relapse",
         "per_day": "{n}×/day",
@@ -93,6 +95,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "verification.provisional": "попередній",
         "verification.suspected": "підозра",
         "verification.differential": "диференційний",
+        "verification.unknown": "достовірність не вказано",
+        "blood.conflict": "{blood}, але резус записано як {rh}: перевірте, що правильно",
         "clinical.recurrence": "рецидив",
         "clinical.relapse": "загострення",
         "per_day": "{n}×/день",
@@ -128,6 +132,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "verification.provisional": "provisional",
         "verification.suspected": "sospecha",
         "verification.differential": "diferencial",
+        "verification.unknown": "certeza no registrada",
+        "blood.conflict": "{blood}, pero el Rh consta como {rh}: compruebe cuál es correcto",
         "clinical.recurrence": "recurrencia",
         "clinical.relapse": "recaída",
         "per_day": "{n}×/día",
@@ -190,16 +196,25 @@ def _word(lang: str, prefix: str, value: str | None) -> str | None:
     return _t(lang, key) if key in STRINGS["en"] else value
 
 
-def blood_type(blood: str | None, rh: str | None) -> str | None:
-    """"A" + "+" → "A+"; "A+" alone stays; Rh as entered when it is not a sign."""
+def blood_type(blood: str | None, rh: str | None, lang: str = "en") -> str | None:
+    """"A" + "+" → "A+"; "A+" alone stays; Rh as entered when it is not a sign. A sign in the
+    blood type that the stored Rh contradicts ("A+" with Rh "-") is shown as the conflict it is:
+    which entry is right is not for code to pick."""
     blood, rh = (blood or "").strip(), (rh or "").strip()
     if not blood:
         return None
-    if not rh or blood[-1] in "+-−":
-        return blood
     # ASCII signs: a tag reader or a lock screen may not have "−"
-    sign = {"+": "+", "pos": "+", "positive": "+", "-": "-", "−": "-", "neg": "-",
-            "negative": "-"}.get(rh.lower())
+    signs = {"+": "+", "pos": "+", "positive": "+", "-": "-", "−": "-", "neg": "-",
+             "negative": "-"}
+    sign = signs.get(rh.lower())
+    own = signs.get(blood[-1])
+    if own:
+        blood = blood[:-1].rstrip() + own
+        if rh and sign != own:
+            return _t(lang, "blood.conflict", blood=blood, rh=rh)
+        return blood
+    if not rh:
+        return blood
     return f"{blood}{sign}" if sign else f"{blood} Rh {rh}"
 
 
@@ -223,7 +238,8 @@ def medication_text(m: dict, lang: str) -> str:
 def condition_text(d: dict, lang: str) -> str:
     marks = [_word(lang, "clinical", d["clinical_status"]) if d["clinical_status"] != "active"
              else None,
-             _word(lang, "verification", d["verification_status"])
+             # no verification status is not "confirmed": say it is unknown
+             _word(lang, "verification", d["verification_status"] or "unknown")
              if d["verification_status"] != "confirmed" else None]
     marks = [m for m in marks if m]
     name = f"{d['name']} {d['icd10']}" if d["icd10"] else d["name"]
@@ -293,7 +309,7 @@ def build(conn, lang: str = "en", tz: tzinfo | None = None) -> dict:
         return {**base, "empty": True, "message": _t(lang, "empty")}
 
     prof = data["profile"] or {}
-    blood = blood_type(prof.get("blood_type"), prof.get("rh_factor"))
+    blood = blood_type(prof.get("blood_type"), prof.get("rh_factor"), lang)
     contact = (prof.get("emergency_contact") or "").strip() or None
     allergies = [allergy_text(a, lang) for a in data["allergies"]]
     meds = [medication_text(m, lang) for m in data["medications"]]

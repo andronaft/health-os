@@ -687,6 +687,7 @@ const EN = {
   "emergency.card.lead": "Credit-card size (85.6 × 54 mm) when folded once along the middle. Print at 100 % scale, cut along the dashed outline.",
   "emergency.card.print": "Print the wallet card",
   "emergency.card.overflow": "This does not fit on a credit-card size card: it prints taller instead, with nothing cut. Keep the full list on the lock screen, or shorten what is recorded.",
+  "emergency.card.overflow_print": "Does not fit on a credit-card size card: printed taller, nothing cut.",
 };
 
 export function t(key, vars = {}) {

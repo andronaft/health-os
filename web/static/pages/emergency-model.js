@@ -69,3 +69,6 @@ export function cardSides(fields) {
   const placed = new Set([...FRONT, ...BACK]);
   return { front: side(FRONT), back: [...side(BACK), ...fields.filter((f) => !placed.has(f.key))] };
 }
+
+/** Is any side taller than a card? Heights in px, the card's from a 54 mm probe in the same layout. */
+export const tallerThanCard = (sideHeights, cardHeight) => sideHeights.some((height) => height > cardHeight + 0.5);

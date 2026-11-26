@@ -1236,8 +1236,8 @@ test("the charts: gaps stay empty, the norm and sodium's limit are dashed lines"
 });
 
 // the emergency packet (#74) and the privacy blur (#63)
-import { NFC_TAGS, cardSides, copyText, ndefSize, nfcBudget, packetLang, utf8Size } from "../web/static/pages/emergency-model.js";
-import { isBlurShortcut } from "../web/static/privacy.js";
+import { NFC_TAGS, cardSides, copyText, ndefSize, nfcBudget, packetLang, tallerThanCard, utf8Size } from "../web/static/pages/emergency-model.js";
+import { hideTitles, isBlurShortcut, restoreTitles } from "../web/static/privacy.js";
 
 test("emergency: the NFC size is the NDEF text record with its wrapping, in UTF-8 bytes", () => {
   // the same figures as core/emergency.py (tests/test_emergency.py)
@@ -1294,4 +1294,44 @@ test("privacy blur: Alt+Shift+B toggles, but not while typing", () => {
   assert.equal(isBlurShortcut(key({ tagName: "DIV", isContentEditable: true })), false);
   assert.equal(isBlurShortcut(key({ tagName: "BODY" }, { ctrlKey: true })), false);
   assert.equal(isBlurShortcut(key({ tagName: "BODY" }, { code: "KeyN" })), false);
+});
+
+test("emergency: a card side taller than the 54 mm probe is reported, the same height is not", () => {
+  assert.equal(tallerThanCard([204.1, 204.1], 204.1), false);
+  assert.equal(tallerThanCard([204.1, 313], 204.1), true);
+  assert.equal(tallerThanCard([204.5], 204.1), false); // rounding, not overflow
+});
+
+test("privacy blur: tooltips are put aside while blurred and given back after", () => {
+  // a minimal stand-in for the DOM: elements with attributes, and SVG <title> elements with text
+  class Node {
+    constructor(localName, attrs = {}, text = "") {
+      this.localName = localName;
+      this.attrs = new Map(Object.entries(attrs));
+      this.textContent = text;
+    }
+    getAttribute(name) { return this.attrs.get(name) ?? null; }
+    setAttribute(name, value) { this.attrs.set(name, String(value)); }
+    removeAttribute(name) { this.attrs.delete(name); }
+  }
+  const year = new Node("button", { title: "1985: born, 3 records" });
+  const mark = new Node("title", {}, "Hypothyroidism · 2022-03-01");
+  const empty = new Node("title", {}, "");
+  const nodes = [year, mark, empty];
+  const root = {
+    querySelectorAll(selector) {
+      const attr = selector.match(/^\[([\w-]+)\]$/);
+      if (attr) return nodes.filter((n) => n.attrs.has(attr[1]));
+      return nodes.filter((n) => n.localName === selector);
+    },
+  };
+  hideTitles(root);
+  assert.equal(year.getAttribute("title"), null);
+  assert.equal(mark.textContent, "");
+  assert.equal(empty.getAttribute("data-privacy-title"), null);
+  hideTitles(root); // again (a redraw): nothing lost
+  restoreTitles(root);
+  assert.equal(year.getAttribute("title"), "1985: born, 3 records");
+  assert.equal(mark.textContent, "Hypothyroidism · 2022-03-01");
+  assert.equal(year.getAttribute("data-privacy-title"), null);
 });

@@ -2118,27 +2118,44 @@ tbody tr:last-child td {
   font-weight: 600;
 }
 
-body.privacy-blur main :is(
-  td, tbody th, dd, pre, textarea, input, time, figcaption, svg, .chart,
-  li:not(.critical-row, .emergency-field, .emergency-tags li),
-  p:not(.quiet, .footnote, .state-note, .state-title, .tile-key, .critical-disclaimer, .report-title,
-        .report-footer, .report-method, .emergency-notice, .emergency-edited, .emergency-warning,
-        .wallet-title, .wallet-label, .emergency-privacy p, .critical-row p, :has(> a:only-child)),
-  .critical-value, .tile-value, .rec-cards h3, .rec-allergies, .matrix, .hb-grid, .vitals-heatmap,
-  .vitals-readout, .diary .quiet, .vitals-head .quiet, .tile .quiet, .review-source .quiet,
-  .food-period, .tl-years, .tl-caption, .private
+/* Blurred by default: every text-bearing element of a page, so a new page is covered without
+   being listed here. */
+body.privacy-blur main .view :is(
+  p, li, td, th, dd, pre, textarea, input, time, figcaption, caption, output, h2, h3, h4, svg, canvas,
+  .chart, .matrix, .hb-grid, .vitals-heatmap, .vitals-readout, .tl-years, .private
 ) {
   filter: blur(0.35rem);
 }
 
-/* column headings and the alert's own words stay readable */
-body.privacy-blur main :is(thead th, .critical h2, .critical-disclaimer) {
+/* Opted out: the page's own words, not the record's. A section's heading, column headings, controls,
+   the explanatory notes a page marks as such, and anything marked `public`. The critical-values
+   alert stays readable: its heading, message and disclaimer — only its value line is blurred. */
+body.privacy-blur main .view :is(
+  section > h2, section > h3, .view > h2, thead th, label, button, select, summary, legend,
+  .footnote, .state *, .tile-key, .public, .public *,
+  li.critical-row, .critical-row p:not(.critical-value), .critical-disclaimer, .critical h2,
+  li.emergency-field, .emergency-field-head *, .emergency-privacy *, .emergency-notice, .emergency-edited,
+  .emergency-warning, .emergency-tags li, .emergency-tags li *, .wallet-title, .wallet-label,
+  .report-title, .report-footer, .report-method, .report-section > h2
+):not(.private, .tl-detail h2) {
   filter: none;
 }
 
-/* blurred text must not be read back through a selection either */
-body.privacy-blur main :is(td, li, p, pre, textarea, .chart, svg) {
+/* the record's names in a card heading are data, even directly under a section */
+body.privacy-blur main .view :is(.rec-cards h3, .tl-detail h2, .tl-detail-kind, .emergency-field-text) {
+  filter: blur(0.35rem);
+}
+
+/* blurred text must not be read back through a selection either; tooltips: privacy.js */
+body.privacy-blur main .view :is(p, li, td, pre, textarea, .chart, svg) {
   user-select: none;
+}
+
+/* paper is not a screenshot: a printed report or wallet card is never blurred */
+@media print {
+  body.privacy-blur main * {
+    filter: none !important;
+  }
 }
 
 @media (max-width: 47.99rem) {
@@ -2342,17 +2359,31 @@ body.privacy-blur main :is(td, li, p, pre, textarea, .chart, svg) {
   line-height: 1.25;
 }
 
-/* measured at the card's height first (emergency.js); a side found too full grows instead */
+/* never clipped, in any layout: a side that is too full grows taller, and emergency.js says so
+   (measured against .wallet-probe on load, resize, and when the print layout applies) */
 .wallet-side {
   box-sizing: border-box;
-  height: 54mm;
+  min-height: 54mm;
   padding: 3mm 3.5mm;
-  overflow: hidden;
+  overflow: visible;
 }
 
-.wallet-card[data-overflow="true"] .wallet-side {
-  height: auto;
-  min-height: 54mm;
+.wallet-sheet {
+  position: relative;
+}
+
+.wallet-probe {
+  position: absolute;
+  width: 0;
+  height: 54mm;
+  visibility: hidden;
+}
+
+.wallet-overflow-print {
+  margin: 1mm 0 0;
+  color: #b42318;
+  font-size: 7pt;
+  font-weight: 600;
 }
 
 .wallet-side + .wallet-side {

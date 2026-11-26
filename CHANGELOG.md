@@ -16,14 +16,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   with its size (the NDEF text record as written) against NTAG213/215/216 user memory (144/504/888
   bytes, NXP data sheet §8.5); over budget it says by how much and never cuts anything. New MCP read
   tool `get_emergency_packet(layout, lang)` (en/uk/es) — 40 tools — and `GET /api/v1/emergency`.
+  A diagnosis with no certainty recorded says so (never passes as confirmed); a blood type whose
+  sign the stored Rh contradicts is shown with both, to be checked. The MCP tool's "as of" date is
+  the day in the new optional `HEALTH_OS_TZ` (else the process's zone; the UI sends the browser's).
 - Browser UI: the **Emergency** page — a copy button per Medical ID field (Clipboard API, with a
   fallback that selects the text), the NFC text with a live byte counter per tag (edit it here to
   shorten it yourself), and a printable wallet card: two credit-card sides (85.6 × 54 mm) that fold
-  once, printed alone on the page; a card too full prints taller and says so. Its language is chosen
+  once, printed alone on the page; a card too full is never clipped: it prints taller and says so,
+  on screen and on the paper. Its language is chosen
   apart from the UI's. A privacy warning says the lock screen and a tag are readable by anyone.
 - Browser UI: privacy blur (#63). A "Blur values" switch in the header (or Alt+Shift+B) blurs
-  values, dates and names on every page, charts included, for screenshots and demos; the
-  critical-values alert stays visible with only its numbers blurred. Remembered in this browser.
+  values, dates and names on every page, charts included, for screenshots and demos: everything a
+  page shows is blurred by default, its headings, controls and marked notes (class `public`) are not,
+  so a new page is covered without being listed. Tooltips are put aside while it is on; prints are
+  never blurred. The critical-values alert stays visible with only its value blurred. Remembered in
+  this browser.
 - Browser UI: the medical-record pages (#57). **Timeline**: the whole record on one axis, in
   lanes (diagnoses; visits, procedures and hospital stays; lab panels; vaccinations; documents),
   with medications and habits drawn as bars from start to stop (to today while ongoing). A
