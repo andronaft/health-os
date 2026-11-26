@@ -54,16 +54,26 @@ export function restoreTitles(root) {
 export function setUpPrivacyBlur(container) {
   const button = el("button", { type: "button", class: "privacy-toggle", title: t("privacy.hint") });
   const main = document.getElementById("main");
-  // pages drawn (or redrawn) while the blur is on
-  const observer = new MutationObserver(() => hideTitles(main));
+  // the page, and the value drawer (a <dialog> appended to <body>, outside <main>)
+  const roots = () => [main, ...document.querySelectorAll(".obs-drawer")].filter(Boolean);
+  // pages and drawers drawn (or redrawn) while the blur is on
+  const watch = { subtree: true, childList: true, attributes: true, attributeFilter: ["title"] };
+  const observer = new MutationObserver(() => {
+    roots().forEach(hideTitles);
+    // a drawer that appeared since: watch its content too (observing a node twice only updates it)
+    for (const drawer of document.querySelectorAll(".obs-drawer")) observer.observe(drawer, watch);
+  });
   const apply = (on) => {
     document.body.classList.toggle(BLUR_CLASS, on);
-    if (main && on) {
-      hideTitles(main);
-      observer.observe(main, { subtree: true, childList: true, attributes: true, attributeFilter: ["title"] });
-    } else if (main) {
+    if (on) {
+      roots().forEach(hideTitles);
+      if (main) observer.observe(main, watch);
+      // a drawer is created on first use: watch <body>'s children for it, and each drawer's content
+      observer.observe(document.body, { childList: true });
+      for (const drawer of document.querySelectorAll(".obs-drawer")) observer.observe(drawer, watch);
+    } else {
       observer.disconnect();
-      restoreTitles(main);
+      roots().forEach(restoreTitles);
     }
     button.setAttribute("aria-pressed", String(on));
     button.textContent = t(on ? "privacy.blur_on" : "privacy.blur");

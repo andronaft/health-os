@@ -10,16 +10,69 @@ import { setUpPrivacyBlur } from "./privacy.js"; // privacy blur (#63)
 const main = document.getElementById("main");
 const navLinks = new Map();
 
+// The menu in groups, so a dozen pages stay easy to scan. A page not named here (a new one) goes in
+// the last group until it is given a place.
+const NAV_GROUPS = [
+  { title: "nav.group.today", ids: ["overview", "review"] },
+  { title: "nav.group.results", ids: ["labs", "vitals", "food"] },
+  { title: "nav.group.record", ids: ["timeline", "medications", "diagnoses", "habits"] },
+  { title: "nav.group.tools", ids: ["report"] },
+];
+
+function groupPages(pages, groups = NAV_GROUPS) {
+  const placed = new Set(groups.flatMap((group) => group.ids));
+  return groups.map((group, i) => ({
+    title: group.title,
+    pages: [
+      ...group.ids.map((id) => pages.find((page) => page.id === id)).filter(Boolean),
+      ...(i === groups.length - 1 ? pages.filter((page) => !placed.has(page.id)) : []),
+    ],
+  })).filter((group) => group.pages.length);
+}
+
+const sidebar = document.querySelector(".sidebar");
+const menuLabel = el("span", { class: "menu-toggle-label" }, t("nav.menu"));
+const menuToggle = el("button", {
+  type: "button",
+  class: "menu-toggle",
+  "aria-expanded": "false",
+  "aria-controls": "nav",
+  onclick: () => setMenuOpen(menuToggle.getAttribute("aria-expanded") !== "true"),
+}, el("span", { class: "menu-toggle-icon", "aria-hidden": "true" }), menuLabel);
+
+// the phone header's menu; on a wide window the CSS shows the menu whatever this says
+function setMenuOpen(open) {
+  menuToggle.setAttribute("aria-expanded", String(open));
+  sidebar.toggleAttribute("data-open", open);
+}
+
 function buildNav() {
-  const items = PAGES.map((page) => {
-    // a page still to come is in the menu, but says so before it is opened
-    const link = el("a", { href: `#/${page.id}`, "data-soon": !page.load },
-      t(page.title),
-      !page.load && el("span", { class: "nav-soon" }, ` · ${t("nav.soon")}`));
-    navLinks.set(page.id, link);
-    return el("li", {}, link);
+  const groups = groupPages(PAGES).map((group, i) => {
+    const titleId = `nav-group-${i}`;
+    const items = group.pages.map((page) => {
+      // a page still to come is in the menu, but says so before it is opened
+      const link = el("a", { href: `#/${page.id}`, "data-soon": !page.load },
+        t(page.title),
+        !page.load && el("span", { class: "nav-soon" }, ` · ${t("nav.soon")}`));
+      navLinks.set(page.id, link);
+      return el("li", {}, link);
+    });
+    return el("li", { class: "nav-group" },
+      el("p", { class: "nav-group-title", id: titleId }, t(group.title)),
+      el("ul", { "aria-labelledby": titleId }, ...items));
   });
-  document.getElementById("nav").append(el("ul", {}, ...items));
+  document.getElementById("nav").append(el("ul", {}, ...groups));
+  // a tap on any link folds the phone menu, the current page's too (its hash doesn't change)
+  document.getElementById("nav").addEventListener("click", (e) => {
+    if (e.target.closest("a")) setMenuOpen(false);
+  });
+  document.querySelector(".brand").after(menuToggle);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && sidebar.hasAttribute("data-open")) {
+      setMenuOpen(false);
+      menuToggle.focus();
+    }
+  });
 }
 
 function markCurrentPage(id) {
@@ -27,6 +80,10 @@ function markCurrentPage(id) {
     if (pageId === id) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   }
+  const page = PAGES.find((candidate) => candidate.id === id);
+  menuLabel.textContent = page ? t(page.title) : t("nav.menu");
+  menuToggle.setAttribute("aria-label", page ? `${t("nav.menu")}: ${t(page.title)}` : t("nav.menu"));
+  setMenuOpen(false);
 }
 
 const currentRoute = () => parseRoute(location.hash) ?? parseRoute("");

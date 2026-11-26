@@ -20,29 +20,58 @@ export function tokenColor(name) {
   return color;
 }
 
+// One theme for every chart, from the same tokens as the page: quiet grid, axes as strong as a
+// table's rules, the text sizes of the type scale, tooltips like a raised card.
 function chartTheme() {
   const fg = tokenColor("--fg");
   const muted = tokenColor("--muted");
-  const border = tokenColor("--border");
+  const grid = tokenColor("--chart-grid");
+  const axisColor = tokenColor("--chart-axis");
+  const surface = tokenColor("--surface");
+  const accent = tokenColor("--accent");
+  const fontFamily = getComputedStyle(document.body).fontFamily;
   const axis = {
-    axisLine: { lineStyle: { color: border } },
-    axisTick: { lineStyle: { color: border } },
-    axisLabel: { color: muted },
-    splitLine: { lineStyle: { color: [border] } },
+    axisLine: { lineStyle: { color: axisColor } },
+    axisTick: { lineStyle: { color: axisColor } },
+    axisLabel: { color: muted, fontSize: 11 },
+    splitLine: { lineStyle: { color: [grid] } },
+    nameTextStyle: { color: muted, fontSize: 11 },
   };
   return {
     color: ["--chart-1", "--chart-2", "--chart-3", "--chart-4"].map((name) => tokenColor(name)),
     backgroundColor: "transparent",
-    textStyle: { color: fg, fontFamily: getComputedStyle(document.body).fontFamily },
-    title: { textStyle: { color: fg }, subtextStyle: { color: muted } },
-    legend: { textStyle: { color: fg } },
+    textStyle: { color: fg, fontFamily, fontSize: 12 },
+    title: { textStyle: { color: fg, fontSize: 13, fontWeight: 600 }, subtextStyle: { color: muted } },
+    legend: { textStyle: { color: fg, fontSize: 12 }, itemWidth: 14, itemHeight: 8 },
     tooltip: {
       // painted on the canvas. The default HTML tooltip writes markup with style attributes, which
       // the CSP blocks (it comes out unformatted); and records must never be parsed as HTML
       renderMode: "richText",
-      backgroundColor: tokenColor("--surface"),
-      borderColor: border,
-      textStyle: { color: fg },
+      backgroundColor: surface,
+      borderColor: axisColor,
+      borderWidth: 1,
+      padding: [6, 10],
+      textStyle: { color: fg, fontSize: 12 },
+      axisPointer: {
+        lineStyle: { color: muted, type: "dashed", width: 1 },
+        crossStyle: { color: muted },
+      },
+    },
+    axisPointer: {
+      lineStyle: { color: muted, type: "dashed", width: 1 },
+      label: { backgroundColor: muted, color: surface },
+    },
+    line: { lineStyle: { width: 2 }, symbolSize: 5, emphasis: { lineStyle: { width: 2.5 } } },
+    bar: { itemStyle: { borderRadius: [2, 2, 0, 0] } },
+    markLine: { label: { color: muted }, lineStyle: { color: muted } },
+    dataZoom: {
+      borderColor: axisColor,
+      fillerColor: tokenColor("--accent-soft"),
+      handleStyle: { color: surface, borderColor: accent },
+      moveHandleStyle: { color: axisColor },
+      dataBackground: { lineStyle: { color: axisColor }, areaStyle: { color: grid } },
+      selectedDataBackground: { lineStyle: { color: accent }, areaStyle: { color: tokenColor("--accent-soft") } },
+      textStyle: { color: muted },
     },
     categoryAxis: axis,
     valueAxis: axis,

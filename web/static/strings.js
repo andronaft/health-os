@@ -4,6 +4,11 @@
 export const LANG = "en"; // asked of the API too: marker names and escalation texts come from it
 
 const EN = {
+  "nav.menu": "Menu",
+  "nav.group.today": "Today",
+  "nav.group.results": "Results",
+  "nav.group.record": "Record",
+  "nav.group.tools": "Tools",
   "nav.overview": "Overview",
   "nav.labs": "Labs",
   "nav.vitals": "Vitals",
