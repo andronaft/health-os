@@ -140,6 +140,8 @@ OBSERVATION_TYPES = [
     # === Wearable / Garmin daily metrics (2026-07-16), category='wearable', specimen=None ===
     ("resting_hr", "40443-4", "Пульс у спокої", "Resting heart rate", "wearable", None, "numeric", "bpm", None),
     ("hrv", "80404-7", "Варіабельність серцевого ритму (HRV)", "Heart rate variability", "wearable", None, "numeric", "ms", None),
+    # Apple Health's HRV is SDNN (Garmin's above is RMSSD-based): its own code, its own baseline (#75)
+    ("hrv_sdnn", None, "Варіабельність серцевого ритму, SDNN (Apple)", "Heart rate variability, SDNN (Apple)", "wearable", None, "numeric", "ms", None),
     ("stress_avg", None, "Середній рівень стресу (Garmin)", "Average stress level", "wearable", None, "numeric", "score", None),
     ("body_battery_high", None, "Body Battery (макс за день)", "Body Battery high", "wearable", None, "numeric", "score", None),
     ("body_battery_low", None, "Body Battery (мін за день)", "Body Battery low", "wearable", None, "numeric", "score", None),

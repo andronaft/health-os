@@ -1290,6 +1290,131 @@ test("the heatmap is a calendar of the year, coloured from its own lowest to hig
   assert.equal(option.series[0].data.length, 4); // a day without a value is not sent as zero
 });
 
+// ---- sustained deviations on the Vitals page (#75) ------------------------------------------------
+import {
+  findingView, shadedRuns, sustainedEmpty, sustainedFootnote, sustainedNotes, sustainedState, withShading,
+} from "../web/static/pages/sustained-model.js";
+import { SUSTAINED_DICTIONARIES, SUSTAINED_LANGS, sustainedTranslator } from "../web/static/pages/sustained-strings.js";
+
+const SUSTAINED_PARAMS = {
+  baseline_days: 60, min_baseline_days: 30, run_days: 3, spread_k: 2,
+  daily: { resting_hr: { direction: "up", min_delta: 3 }, hrv: { direction: "down", min_delta: 5 } },
+  hr_above_resting: 30, min_minutes: 20,
+};
+const PAIRED = {
+  kind: "days", first_day: "2026-11-03", last_day: "2026-11-06", days: 4, together_days: 3,
+  metrics: [
+    { code: "resting_hr", direction: "up", first_day: "2026-11-03", last_day: "2026-11-06", days: 4, usual: 59, mean_delta: 7.2 },
+    { code: "hrv", direction: "down", first_day: "2026-11-03", last_day: "2026-11-05", days: 3, usual: 46, mean_delta: -12.3 },
+  ],
+  context: [
+    { kind: "workout", day: "2026-11-04", type: "running", minutes: 45 },
+    { kind: "beta_blocker", name: "Bisoprolol", atc_code: "C07AB07" },
+  ],
+};
+const STILL = {
+  kind: "minutes", start: "2026-11-19T15:05:00+02:00", end: "2026-11-19T15:30:00+02:00", day: "2026-11-19",
+  minutes: 25, usual: 58, mean_hr: 95.4, max_hr: 101, context: [],
+};
+
+test("a lasting change is said as how far from your usual, with its context", () => {
+  const view = findingView(PAIRED);
+  assert.equal(view.title, "Resting heart rate and HRV");
+  assert.equal(view.period, "2026-11-03 – 2026-11-06 · 4 days");
+  assert.deepEqual(view.lines, [
+    "Resting heart rate: 7 bpm above your usual 59 bpm on average, 4 days in a row",
+    "HRV: 12 ms below your usual 46 ms on average, 3 days in a row",
+    "Both on 3 of the same days",
+  ]);
+  assert.deepEqual(view.chips, [
+    "Workout on 2026-11-04: running, 45 min",
+    "Bisoprolol: a beta blocker, which lowers heart rate and can hide a rise",
+  ]);
+  const still = findingView(STILL);
+  assert.equal(still.period, "2026-11-19, 15:05–15:30 · 25 min"); // the user's clock, as the API wrote it
+  assert.deepEqual(still.lines, ["On average 95 bpm, 37 above your usual resting 58 bpm, with no steps recorded"]);
+});
+
+test("Ukrainian and Spanish say the days with their own plural forms", () => {
+  assert.match(findingView(PAIRED, "uk").lines[0], /4 дні поспіль$/);
+  assert.match(findingView({ ...PAIRED, metrics: [{ ...PAIRED.metrics[0], days: 5 }] }, "uk").lines[0], /5 днів поспіль$/);
+  assert.match(findingView(PAIRED, "es").lines[1], /3 días seguidos$/);
+  assert.equal(sustainedTranslator("fr").lang, "en");
+});
+
+test("an empty list never says everything is normal, and says when nothing could be checked", () => {
+  const empty = { findings: [], params: SUSTAINED_PARAMS, days_with_values: { resting_hr: 200, hrv: 0 } };
+  assert.equal(sustainedState(empty), "empty");
+  assert.match(sustainedEmpty(empty), /for 3 days in a row\. This only covers what the watch recorded\.$/);
+  const short = { ...empty, days_with_values: { resting_hr: 12, hrv: 12 } };
+  assert.equal(sustainedState(short), "not_enough");
+  assert.match(sustainedEmpty(short), /fewer than 30 days of values in the 60 days before/);
+  assert.equal(sustainedState(null), "none");
+  assert.equal(sustainedState({ ...empty, findings: [STILL] }), "findings");
+});
+
+test("the footnote gives the thresholds as initial defaults and what the rule can't see", () => {
+  const text = sustainedFootnote({ params: SUSTAINED_PARAMS });
+  assert.match(text, /60 days before; 3 days in a row/);
+  assert.match(text, /at least 3 bpm, HRV down by at least 5 ms/);
+  assert.match(text, /initial defaults, to be reviewed/);
+  assert.match(text, /No ECG/);
+  assert.doesNotMatch(text, /\{\w+\}/);
+  for (const lang of SUSTAINED_LANGS) assert.doesNotMatch(sustainedFootnote({ params: SUSTAINED_PARAMS }, lang), /\{\w+\}/);
+});
+
+test("every sustained dictionary has every word and plural form, and none of them alarms or reassures", () => {
+  const plain = Object.keys(SUSTAINED_DICTIONARIES.en).filter((key) => !/_(one|other)$/.test(key));
+  const plurals = [...new Set(Object.keys(SUSTAINED_DICTIONARIES.en).filter((key) => /_other$/.test(key)).map((key) => key.replace(/_other$/, "")))];
+  for (const lang of SUSTAINED_LANGS) {
+    const dict = SUSTAINED_DICTIONARIES[lang];
+    for (const key of plain) assert.ok(dict[key], `${lang}: ${key}`);
+    const forms = new Intl.PluralRules(lang).resolvedOptions().pluralCategories.filter((form) => form !== "many" || lang !== "es");
+    for (const key of plurals) for (const form of forms) assert.ok(dict[`${key}_${form}`], `${lang}: ${key}_${form}`);
+    for (const text of Object.values(dict)) {
+      assert.doesNotMatch(text.toLowerCase(), /everything is normal|all normal|todo normal|все в нормі|nothing to worry|danger|urgent|alarm|тривог|небезпе|peligro|urgente/);
+    }
+  }
+});
+
+test("without recorded workouts the list says step-free exercise may show up in it", () => {
+  const base = { findings: [], params: SUSTAINED_PARAMS };
+  assert.match(sustainedNotes({ ...base, minutes_rule: "checked", workouts_recorded: false })[0], /No workouts are recorded here/);
+  const gym = { kind: "workout", day: "2026-11-04", type: "traditional_strength_training", minutes: 50 };
+  assert.deepEqual(findingView({ ...PAIRED, context: [gym] }).chips, ["Workout on 2026-11-04: traditional strength training, 50 min"]);
+  assert.match(sustainedNotes({ ...base, minutes_rule: "checked", workouts_recorded: false }, "uk")[0], /Тренувань тут не записано/);
+  assert.deepEqual(sustainedNotes({ ...base, minutes_rule: "checked", workouts_recorded: true }), []);
+  assert.deepEqual(sustainedNotes({ ...base, minutes_rule: "no_samples", workouts_recorded: false }), []); // Garmin only: no minutes rule
+  assert.equal(findingView({ ...PAIRED, metrics: [{ ...PAIRED.metrics[1], code: "hrv_sdnn" }], together_days: null }).title, "HRV (SDNN, Apple)");
+});
+
+test("the runs are shaded on their own panels, the last day included", () => {
+  const panels = [
+    { id: "sleep", series: [{ code: "sleep_duration" }] },
+    { id: "hrv", series: [{ code: "hrv" }] },
+    { id: "resting_hr", series: [{ code: "resting_hr" }] },
+  ];
+  const sustained = { findings: [PAIRED, STILL] };
+  assert.deepEqual(shadedRuns(sustained, panels), [
+    { panel: 2, from: Date.parse("2026-11-03"), to: Date.parse("2026-11-07") },
+    { panel: 1, from: Date.parse("2026-11-03"), to: Date.parse("2026-11-06") },
+  ]);
+  assert.deepEqual(shadedRuns(sustained, panels.slice(0, 1)), []); // a panel that isn't drawn
+  const option = { series: [{ name: "own" }] };
+  const shaded = withShading(option, sustained, panels, { colors: { sustained: "a", sustainedEdge: "b", muted: "c" } });
+  assert.equal(shaded.series.length, 3);
+  assert.equal(shaded.series[0].name, "own");
+  assert.deepEqual(shaded.series.slice(1).map((s) => [s.xAxisIndex, s.markArea.data.length, s.markArea.label.show]), [[2, 1, true], [1, 1, true]]);
+  const weekly = withShading(option, sustained, panels, { colors: {}, bucket: "week" });
+  assert.equal(weekly.series[1].markArea.label.show, false);
+  assert.equal(withShading(option, { findings: [] }, panels, { colors: {} }), option);
+  const windowed = { xAxis: [{ min: Date.parse("2026-11-05") }], series: [] };
+  const clipped = withShading(windowed, sustained, panels, { colors: {} });
+  assert.deepEqual(clipped.series.map((s) => s.markArea.data[0][0].xAxis), [Date.parse("2026-11-05"), Date.parse("2026-11-05")]);
+  const later = { xAxis: [{ min: Date.parse("2026-11-06") }], series: [] };
+  assert.equal(withShading(later, sustained, panels, { colors: {} }).series.length, 1); // HRV ended before it
+});
+
 test("the vitals page loads", () => {
   assert.ok(PAGES.find((page) => page.id === "vitals").load);
   assert.deepEqual(parseRoute("#/vitals/365").args, ["365"]);

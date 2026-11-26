@@ -2135,6 +2135,47 @@ tbody tr:last-child td {
   }
 }
 
+/* Sustained deviations on the Vitals page (#75): a short "worth checking" list above the watch's
+   charts. Amber, like the shaded days on the charts: worth a look, not an alarm (red is for
+   critical values alone). */
+.sustained {
+  border-left: 4px solid var(--chart-4);
+}
+
+.sustained h3 {
+  margin: 0 0 0.25rem;
+}
+
+.sustained-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.sustained-item p {
+  margin: 0.15rem 0;
+}
+
+.sustained-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.sustained-note {
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--border);
+}
+
+.sustained-chip {
+  padding: 0 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 /* Vitals (#56): a window switch, the BP diary card beside its chart, one tall synchronized chart
    of the watch's values, a year of days per heatmap */
 .vitals {

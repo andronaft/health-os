@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import text
 
+from analytics import sustained as lasting
 from core import queries as q
 from safety.critical_values import LANGUAGES
 from web.zones import parse_tz  # noqa: F401  (re-exported for callers of this module)
@@ -378,12 +379,17 @@ def vitals(conn, lang: str = "en", days=DEFAULT_WINDOW, tz: tzinfo | None = None
     uid = q.user_id(conn)
     if uid is None:
         return {"window": window, "blood_pressure": None, "wearables": [], "load": None,
-                "heatmaps": []}
+                "heatmaps": [], "sustained": None}
     names = q.marker_names(conn, lang)
     units = _units(conn, (*WEARABLE_CODES, *BP_CODES))
 
     load_since = since - timedelta(days=CHRONIC_DAYS - 1)
-    daily = _daily(conn, uid, WEARABLE_CODES, min(load_since, year_from), today, tz, day_zone)
+    # sustained deviations (#75) need the days before the window too: their own baselines
+    lasting_since = since - timedelta(days=lasting.LOOKBACK_DAYS)
+    # the rule also reads codes this page doesn't draw (Apple's hrv_sdnn)
+    codes = (*WEARABLE_CODES, *(c for c in lasting.DEFAULTS.daily if c not in WEARABLE_CODES))
+    daily = _daily(conn, uid, codes, min(load_since, year_from, lasting_since), today, tz,
+                   day_zone)
     wearables = []
     for code in WEARABLE_CODES:
         in_window = {d: v for d, v in daily.get(code, {}).items() if d >= since}
@@ -410,4 +416,5 @@ def vitals(conn, lang: str = "en", days=DEFAULT_WINDOW, tz: tzinfo | None = None
         "wearables": wearables,
         "load": load,
         "heatmaps": heatmaps,
+        "sustained": lasting.find(conn, uid, since, today, tz, daily=daily),
     }
