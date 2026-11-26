@@ -82,19 +82,55 @@ def beta_blockers(conn, uid, params: SustainedParams = DEFAULTS) -> list[dict]:
     return [{"name": name, "atc_code": atc, "start_date": start} for name, atc, start in rows]
 
 
-def _heart_rate(conn, uid, lo: datetime, hi: datetime, floor: float) -> list[tuple[datetime, float]]:
-    """Heart rate samples at or above `floor` and their neighbours: a sample below every day's
-    line ends a run, so it must be seen, but a year of resting samples need not be."""
-    rows = conn.execute(text(
-        """SELECT ts, value FROM (
-               SELECT ts, value, lag(value) OVER w AS prev, lead(value) OVER w AS next
+def _high_runs(conn, uid, lo: datetime, hi: datetime, tz: ZoneInfo, first: date,
+               lines: list[float | None],
+               params: SustainedParams) -> list[list[tuple[datetime, float]]]:
+    """Runs of heart rate samples at or above their day's line (`lines[k]`: the line of day
+    `first + k` in the user's zone; None: no baseline that day), split where a sample is below it
+    or two samples are more than `max_sample_gap_minutes` apart, that last at least
+    `min_minutes`. Found in the database (gaps and islands over the index-ordered samples, the
+    line looked up by position, so nothing is sorted twice); only those runs' samples leave it.
+    A year of samples (~250k at one per two minutes) is otherwise read and walked in Python on
+    every page load. Steps and workouts are not looked at here: the pure rule re-checks each run
+    with them."""
+    params_sql = {"u": uid, "lo": lo, "hi": hi, "tz": tz.key, "first": first, "lines": lines,
+                  "floor": min(v for v in lines if v is not None),
+                  "gap": timedelta(minutes=params.max_sample_gap_minutes),
+                  "min_span": timedelta(minutes=params.min_minutes),
+                  "min_samples": params.min_samples}
+    spans = conn.execute(text(
+        """WITH s AS (
+               -- most samples are below every day's line: no zone arithmetic for them
+               SELECT ts, CASE WHEN value < :floor THEN false
+                               ELSE value >= (CAST(:lines AS float8[]))
+                                   [((ts AT TIME ZONE :tz)::date - CAST(:first AS date)) + 1]
+                          END AS high
                FROM device_samples
                WHERE user_id = :u AND type_code = 'heart_rate' AND ts >= :lo AND ts < :hi
-               WINDOW w AS (ORDER BY ts)) s
-           WHERE value >= :floor OR prev >= :floor OR next >= :floor
-           ORDER BY ts"""),
-        {"u": uid, "lo": lo, "hi": hi, "floor": floor}).all()
-    return [(ts, float(v)) for ts, v in rows]
+               ORDER BY ts),
+           g AS (
+               SELECT ts, high,
+                      CASE WHEN high AND lag(high) OVER w AND ts - lag(ts) OVER w <= :gap
+                           THEN 0 ELSE 1 END AS starts
+               FROM s WINDOW w AS (ORDER BY ts)),
+           r AS (SELECT ts, high, sum(starts) OVER (ORDER BY ts ROWS UNBOUNDED PRECEDING) AS run
+                 FROM g)
+           SELECT min(ts) AS lo, max(ts) AS hi FROM r WHERE high GROUP BY run
+           HAVING max(ts) - min(ts) >= :min_span AND count(*) >= :min_samples
+           ORDER BY lo"""), params_sql).all()
+    if not spans:
+        return []
+    rows = conn.execute(text(
+        """SELECT w.k, s.ts, s.value FROM device_samples s
+           JOIN unnest(CAST(:los AS timestamptz[]), CAST(:his AS timestamptz[]))
+                WITH ORDINALITY AS w(lo, hi, k) ON s.ts BETWEEN w.lo AND w.hi
+           WHERE s.user_id = :u AND s.type_code = 'heart_rate'
+           ORDER BY w.k, s.ts"""),
+        {"u": uid, "los": [a for a, _ in spans], "his": [b for _, b in spans]}).all()
+    runs: dict[int, list[tuple[datetime, float]]] = {}
+    for k, ts, value in rows:
+        runs.setdefault(k, []).append((ts, float(value)))
+    return list(runs.values())
 
 
 def _steps_near(conn, uid, spans: list[tuple[datetime, datetime]],
@@ -111,7 +147,7 @@ def _steps_near(conn, uid, spans: list[tuple[datetime, datetime]],
     return [(ts, float(v)) for ts, v in rows]
 
 
-def intraday(conn, uid, since: date, until: date, tz: tzinfo, resting: dict[date, float],
+def intraday(conn, uid, since: date, until: date, tz: ZoneInfo, resting: dict[date, float],
              work: list[dict], meds: list[dict], params: SustainedParams = DEFAULTS) -> list[dict]:
     """The minutes rule on Apple Health raw samples between `since` and `until` (user's days)."""
     days = [since + timedelta(days=i) for i in range((until - since).days + 1)]
@@ -119,15 +155,17 @@ def intraday(conn, uid, since: date, until: date, tz: tzinfo, resting: dict[date
     if not medians:
         return []
     lo, hi = _bounds(since, until, tz)
-    hr = _heart_rate(conn, uid, lo, hi, min(medians.values()) + params.hr_above_resting)
-    if not hr:
+    lines = [medians[d] + params.hr_above_resting if d in medians else None for d in days]
+    runs = _high_runs(conn, uid, lo, hi, tz, since, lines, params)
+    if not runs:
         return []
-    # candidates without steps first; then only the step records near them are read
-    candidates = intraday_episodes(hr, resting_by_day=medians, tz=tz, params=params)
-    spans = [(e["start"], e["end"]) for e in candidates]
+    # the step records near those runs only; each run is then checked on its own by the pure
+    # rule, so two runs the database split are never joined again
+    spans = [(run[0][0], run[-1][0]) for run in runs]
     steps = _steps_near(conn, uid, spans, timedelta(minutes=params.step_margin_minutes))
-    episodes = intraday_episodes(hr, resting_by_day=medians, steps=steps, workouts=work, tz=tz,
-                                 params=params)
+    episodes = [e for run in runs
+                for e in intraday_episodes(run, resting_by_day=medians, steps=steps, workouts=work,
+                                           tz=tz, params=params)]
     for e in episodes:
         e["context"] = context_for(e["day"], e["day"], ["heart_rate"], [], meds, tz, params)
     return episodes
