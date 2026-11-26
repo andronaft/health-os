@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 
 ## [Unreleased]
 
+### Changed
+- Browser UI: a design pass over every page. One token set in `styles.css` (type and spacing
+  scales, radii, elevation, colour roles; links and focus in teal so blue only ever means "low"),
+  one card, table, pill, empty-state and section-header style for all pages, a sticky tinted
+  header on long tables, tabular numbers, one segmented switch for the Food period and the Vitals
+  window, a gentler loading state (none with reduced motion). The menu is grouped (Today /
+  Results / Record / Tools) and marks the current page; on a phone it folds into a one-line header
+  that names the page. Charts share one ECharts theme drawn from the same tokens in both themes.
+
 ### Added
 - Browser UI: the medical-record pages (#57). **Timeline**: the whole record on one axis, in
   lanes (diagnoses; visits, procedures and hospital stays; lab panels; vaccinations; documents),
