@@ -122,7 +122,7 @@ def series(conn, uid: str, type_code: str, days: int = MAX_DAYS,
     code, days = norm_code(type_code), clamp_days(days)
     rows = conn.execute(
         text(
-            """SELECT effective_at, value_numeric, comparator, value_text, unit,
+            """SELECT id::text AS id, effective_at, value_numeric, comparator, value_text, unit,
                       value_canonical, canonical_unit, ref_min, ref_max, status, panel_id
                FROM (SELECT * FROM v_observations
                      WHERE user_id=:u AND type_code=:c
@@ -175,7 +175,8 @@ def markers(conn, uid: str, category: str | None = None) -> list[dict]:
         text(
             f"""WITH latest AS (
                     SELECT DISTINCT ON (type_code)
-                           type_code, name_uk, category, effective_at, value_numeric, comparator,
+                           id::text AS id, type_code, name_uk, category, effective_at,
+                           value_numeric, comparator,
                            value_text, unit, value_canonical, canonical_unit, ref_min, ref_max,
                            status
                     FROM v_observations WHERE user_id=:u {cat}

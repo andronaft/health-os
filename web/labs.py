@@ -82,7 +82,8 @@ def _matrix(conn, uid, names: dict) -> dict:
     """Markers × the latest MATRIX_DATES days with a lab value, newest day first. A day with two
     values of one marker shows the later one."""
     rows = conn.execute(text(
-        """SELECT type_code, effective_at, value_numeric, comparator, value_text, unit, status
+        """SELECT id::text AS id, type_code, effective_at, value_numeric, comparator, value_text,
+                  unit, status
            FROM v_observations WHERE user_id = :u AND category = :c
            ORDER BY effective_at"""),
         {"u": uid, "c": LAB}).mappings().all()
@@ -92,7 +93,7 @@ def _matrix(conn, uid, names: dict) -> dict:
     for r in rows:
         day = _day(r["effective_at"])
         if day in shown:
-            cells[r["type_code"]][day] = {**_value(r), "status": r["status"]}
+            cells[r["type_code"]][day] = {**_value(r), "status": r["status"], "id": r["id"]}
     return {
         "dates": days,
         "older_dates": len({_day(r["effective_at"]) for r in rows}) - len(days),
@@ -111,6 +112,7 @@ def lab_index(conn, lang: str = "en") -> dict:
     sparks = _sparklines(conn, uid)
     pending = _pending_counts(conn, uid)
     markers = [{
+        "id": m["id"],  # the latest value's: what the drawer opens
         "code": m["type_code"],
         "name": names.get(m["type_code"], m["type_code"]),
         "specimen": specimens.get(m["type_code"]),
@@ -181,14 +183,15 @@ def lab_marker(conn, code: str, lang: str = "en") -> dict | None:
     def point(row, pending: bool) -> dict:
         original = {**_value(row), "ref_min": _number(row["ref_min"]),
                     "ref_max": _number(row["ref_max"])}
-        return {"at": row["effective_at"], "value": _number(row["value_canonical"]),
+        return {"id": row["id"], "at": row["effective_at"],
+                "value": _number(row["value_canonical"]),
                 "original": original, "range": band(row, unit, conversions),
                 "status": row["status"], "pending": pending}
 
     approved = q.series(conn, uid, code)["points"] if uid else []
     pending = conn.execute(text(
-        """SELECT effective_at, value_numeric, value_text, unit, value_canonical, ref_min, ref_max,
-                  status
+        """SELECT id::text AS id, effective_at, value_numeric, value_text, unit, value_canonical,
+                  ref_min, ref_max, status
            FROM v_observations_pending WHERE user_id = :u AND type_code = :c
            ORDER BY effective_at"""), {"u": uid, "c": code}).mappings().all() if uid else []
 

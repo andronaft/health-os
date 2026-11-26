@@ -407,6 +407,137 @@ test("counts read as one or many", () => {
 
 // ---- small charts don't exaggerate; events and links -----------------------------------------
 
+// ---- where a value comes from (the drawer) and the range bar (#64) ----------------------------
+import { BAND_FROM, BAND_TO, rangeBar, rangePosition, trackDomain } from "../web/static/pages/range-model.js";
+import {
+  canonicalRangeText, conversionText, defaultRangeText, documentText, panelText, rangeText, reviewLines,
+} from "../web/static/pages/observation-model.js";
+
+test("the range bar: below, inside, above, with the range in the middle of the track", () => {
+  const range = { ref_min: 3.9, ref_max: 5.6, unit: "mmol/L" };
+  const inside = rangeBar({ ...range, value: 5 });
+  assert.equal(inside.kind, "bar");
+  assert.equal(inside.position, "inside");
+  assert.deepEqual([inside.band.from, inside.band.to], [BAND_FROM, BAND_TO]);
+  assert.ok(inside.at > inside.band.from && inside.at < inside.band.to);
+  assert.equal(inside.clamped, null);
+  assert.equal(inside.label, "5 mmol/L: inside the range 3.9–5.6 mmol/L");
+  assert.equal(rangeBar({ ...range, value: 3.1 }).position, "below");
+  assert.equal(rangeBar({ ...range, value: 6.2 }).position, "above");
+  assert.equal(rangeBar({ ...range, value: 6.2 }).clamped, null);
+  // on a limit is inside, as core.normalize.compute_status says
+  assert.equal(rangeBar({ ...range, value: 5.6 }).position, "inside");
+  assert.equal(rangeBar({ ...range, value: 3.9 }).position, "inside");
+});
+
+test("the range bar: a value far outside is clamped to the edge and says so", () => {
+  const far = rangeBar({ value: 60, unit: "mmol/L", ref_min: 3.9, ref_max: 5.6 });
+  assert.equal(far.position, "above");
+  assert.equal(far.at, 100);
+  assert.equal(far.clamped, "high");
+  assert.match(far.label, /above the range.*far above/);
+  const low = rangeBar({ value: -40, ref_min: 3.9, ref_max: 5.6 });
+  assert.deepEqual([low.at, low.clamped, low.position], [0, "low", "below"]);
+});
+
+test("the range bar: a missing min or max is an open side of the band", () => {
+  const onlyMax = rangeBar({ value: 3.8, unit: "mmol/L", ref_min: null, ref_max: 3.0 });
+  assert.equal(onlyMax.position, "above");
+  assert.deepEqual([onlyMax.band.from, onlyMax.band.to, onlyMax.band.openLow, onlyMax.band.openHigh],
+    [0, BAND_TO, true, false]);
+  assert.equal(onlyMax.label, "3.8 mmol/L: above the range ≤ 3 mmol/L");
+  const onlyMin = rangeBar({ value: 1.2, ref_min: 1.0, ref_max: null });
+  assert.equal(onlyMin.position, "inside");
+  assert.deepEqual([onlyMin.band.from, onlyMin.band.to, onlyMin.band.openHigh], [BAND_FROM, 100, true]);
+  assert.equal(rangeBar({ value: 0.8, ref_min: 1.0, ref_max: null }).position, "below");
+  // a range with no width, and limits at or below zero, still give a track
+  assert.deepEqual(trackDomain(5, 5), [0, 10]);
+  assert.deepEqual(trackDomain(null, -2), [-8, 0]);
+  assert.equal(rangeBar({ value: -1, ref_min: null, ref_max: -2 }).position, "above");
+});
+
+test("the range bar: a limit is above only when the limit itself is past the range", () => {
+  const range = { ref_min: 30, ref_max: 400, unit: "ng/mL" };
+  const above = rangeBar({ ...range, value: 600, comparator: ">" });
+  assert.deepEqual([above.position, above.limit], ["above", ">"]);
+  assert.equal(above.label, ">600 ng/mL is a limit: above the range 30–400 ng/mL (far above: off the bar)");
+  assert.equal(rangeBar({ ...range, value: 450, comparator: ">" }).label, ">450 ng/mL is a limit: above the range 30–400 ng/mL");
+  // ">100": the true value could be inside or above
+  const unsure = rangeBar({ ...range, value: 100, comparator: ">" });
+  assert.equal(unsure.position, "unknown");
+  assert.match(unsure.label, /only a limit: whether it is inside .* can't be told/);
+  assert.equal(rangePosition(400, ">", 30, 400), "above");
+  assert.equal(rangePosition(400, ">=", 30, 400), "unknown");
+  assert.equal(rangePosition(50, ">", 30, null), "inside");
+  // "<0.5" with a range from 0: a concentration can't be below 0, so it is in range
+  assert.equal(rangePosition(0.5, "<", 0, 5), "inside");
+  assert.equal(rangePosition(20, "<", 30, 400), "below");
+  assert.equal(rangePosition(30, "<", 30, 400), "below");
+  assert.equal(rangePosition(30, "<=", 30, 400), "unknown");
+  assert.equal(rangePosition(500, "<", 30, 400), "unknown");
+});
+
+test("the range bar: no range, or a result in words, draws nothing", () => {
+  assert.equal(rangeBar({ value: 5, ref_min: null, ref_max: null }).kind, "none");
+  assert.equal(rangeBar({ value: 5, ref_min: null, ref_max: null }).label, "no range on the form");
+  assert.equal(rangeBar({ value: null, text: "negative", ref_min: 0, ref_max: 1 }).kind, "none");
+  assert.equal(rangeBar({ value: Number.NaN, ref_min: 0, ref_max: 1 }).kind, "none");
+  assert.equal(rangePosition(5, null, null, null), "unknown");
+});
+
+test("the drawer says how a value was converted, and never invents a conversion", () => {
+  const printed = { value: 99, comparator: null, text: null, unit: "mg/dL" };
+  const canonical = { value: 5.4945, unit: "mmol/L", state: "converted", factor: 0.0555, offset: null };
+  assert.equal(conversionText({ printed, canonical }), "5.4945 mmol/L, converted from mg/dL (× 0.0555).");
+  assert.equal(conversionText({ printed, canonical: { ...canonical, factor: null } }),
+    "5.4945 mmol/L, converted from mg/dL");
+  assert.equal(conversionText({ printed: { ...printed, unit: "degF" }, canonical: { ...canonical, unit: "Cel", factor: 0.555556, offset: -17.777778 } }),
+    "5.4945 Cel, converted from degF (× 0.555556 + -17.7778).");
+  assert.equal(conversionText({ printed: { ...printed, unit: "ukat/L" }, canonical: { value: null, unit: "U/L", state: "not_converted" } }),
+    "Not converted: no conversion from “ukat/L” to U/L. Trends and charts leave it out.");
+  assert.equal(conversionText({ printed: { ...printed, unit: null }, canonical: { value: null, unit: null, state: "not_converted" } }),
+    "Not converted: no conversion from “no unit” to —. Trends and charts leave it out.");
+  assert.equal(conversionText({ printed: { ...printed, comparator: ">", value: 600, unit: "ng/mL" }, canonical: { value: 600, unit: "ng/mL", state: "same_unit" } }),
+    ">600 ng/mL: already in the canonical unit, not converted.");
+  assert.equal(conversionText({ printed, canonical: { state: "text" } }), "A result in words: there is no number to convert.");
+});
+
+test("the drawer says where the range came from; a default is only a hint", () => {
+  assert.equal(rangeText({ range: { source: "form", min: 70, max: 100, unit: "mg/dL" } }), "From the form: 70–100 mg/dL");
+  assert.equal(rangeText({ range: { source: "none", min: null, max: null } }), "None on the form.");
+  assert.equal(defaultRangeText({ min: 120, max: 155, unit: "g/L", kind: "population", sex: "female", condition: null, source: "WHO" }),
+    "120–155 g/L · women · WHO");
+  assert.equal(defaultRangeText({ min: null, max: 3, unit: "mmol/L", kind: "target", sex: null, condition: null, source: "ESC 2021" }),
+    "≤ 3 mmol/L · target · ESC 2021");
+  const converted = { state: "converted", unit: "mmol/L" };
+  assert.equal(canonicalRangeText({ range: { canonical: { min: 3.885, max: 5.55, unconverted: false } }, canonical: converted, printed: { unit: "mg/dL" } }),
+    "In the canonical unit: 3.885–5.55 mmol/L");
+  assert.equal(canonicalRangeText({ range: { canonical: null }, canonical: converted, printed: { unit: "mg/dL" } }), "");
+  assert.equal(canonicalRangeText({ range: { canonical: { min: 1, max: 2 } }, canonical: { state: "same_unit" }, printed: {} }), "");
+});
+
+test("the drawer's review lines: a pending value is never dated as reviewed", () => {
+  const review = { status: "pending", channel: "mcp", staged_at: "2026-11-20T10:00:00+00:00", reviewed_at: null, reviewed_by: null };
+  assert.deepEqual(reviewLines({ review, pending: true }), [
+    "Review status: pending", "Came in by: the assistant, from a form", "Recorded on 2026-11-20", "Not reviewed yet."]);
+  // even if a date slipped through, a pending value says it is not reviewed
+  assert.equal(reviewLines({ review: { ...review, reviewed_at: "2026-11-21" }, pending: true }).at(-1), "Not reviewed yet.");
+  assert.equal(reviewLines({ review: { ...review, status: "approved", reviewed_at: "2026-11-21T09:00:00+00:00", reviewed_by: "human" }, pending: false }).at(-1),
+    "Approved on 2026-11-21 by you");
+  assert.equal(reviewLines({ review: { status: "approved", channel: "manual", staged_at: null, reviewed_at: null }, pending: false }).at(-1),
+    "No separate review recorded: it was stored as approved.");
+  assert.equal(reviewLines({ review: { status: "weird", channel: "fax" }, pending: true })[0], "Review status: weird");
+});
+
+test("the drawer's source lines", () => {
+  assert.equal(documentText(null), "none stored");
+  assert.equal(documentText({ title: "Blood test", date: "2026-10-01", type: "lab_report" }), "Blood test · 2026-10-01 · lab_report");
+  assert.equal(documentText({ title: null, date: null, type: null }), "untitled");
+  assert.equal(panelText({ date: "2026-10-01", type: "Biochemistry", facility: "Lab", rows_in_document: 3 }),
+    "2026-10-01 · Biochemistry · Lab · 3 rows on the form");
+  assert.equal(panelText({ date: "2026-10-01", type: null, facility: null, rows_in_document: null }), "2026-10-01");
+});
+
 test("a small chart's axis spans at least 5% of the values, so a tiny change stays small", () => {
   const [low, high] = chartRange([68.35, 68.4]);
   assert.ok(high - low >= 68.375 * 0.05 - 1e-9);
