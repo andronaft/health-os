@@ -12,6 +12,8 @@ import {
   qualitative, qualitativeOption, sparkLabel, sparkPoints, specimenOptions, specimenWord, tableRows,
   tn, trendLines, unconverted,
 } from "./labs-model.js";
+import { openObservation, valueButton, valueCell } from "./observation.js";
+import { rangeBarElement } from "./range-bar.js";
 
 const SVG = "http://www.w3.org/2000/svg";
 const SPARK = { width: 96, height: 24 };
@@ -62,9 +64,17 @@ function markerTable(markers) {
     columns: [
       { key: "name", label: t("labs.col.marker"), render: markerLink },
       { key: "specimen", label: t("labs.col.specimen"), value: (row) => specimenWord(row.specimen) },
-      { key: "value", label: t("labs.col.latest"), numeric: true, render: formatValue, text: formatValue },
+      { key: "value", label: t("labs.col.latest"), numeric: true, render: (row) => valueCell(row), text: formatValue },
       { key: "status", label: t("labs.col.status"), value: (row) => statusWord(row.status), render: (row) => statusPill(row.status) },
-      { key: "range", label: t("overview.col.range"), value: formatRange, sortable: false },
+      {
+        key: "range",
+        label: t("overview.col.range"),
+        value: formatRange,
+        sortable: false,
+        render: (row) => (formatRange(row)
+          ? el("span", { class: "range-cell" }, rangeBarElement(row), " ", formatRange(row))
+          : ""),
+      },
       { key: "spark", label: t("labs.col.history"), sortable: false, value: () => "", render: sparkline },
       { key: "n", label: t("labs.col.values"), numeric: true, text: historyText, render: historyText },
       { key: "at", label: t("labs.col.date"), render: (row) => formatDate(row.at) },
@@ -97,7 +107,7 @@ function matrixCell(cell) {
   if (!cell) return el("td", { class: "matrix-empty" }, el("span", { class: "visually-hidden" }, t("labs.matrix.no_value")));
   const key = statusKey(cell.status);
   return el("td", { class: "matrix-cell", "data-status": key },
-    cellText(cell), " ",
+    valueButton(cell.id, el("span", {}, cellText(cell))), " ",
     el("span", { "aria-hidden": "true" }, statusIcon(key)),
     el("span", { class: "visually-hidden" }, ` ${statusWord(key)}`));
 }
@@ -149,10 +159,19 @@ function valuesTable(data) {
         label: data.unit ? t("labs.col.value_in", { unit: data.unit }) : t("labs.col.value"),
         numeric: true,
         value: (row) => row.value,
-        render: (row) => el("span", { class: row.pending ? "value-pending" : null }, row.value ?? row.original.text ?? ""),
+        render: (row) => valueButton(row.id,
+          el("span", { class: row.pending ? "value-pending" : null }, String(row.value ?? row.original.text ?? ""))),
       },
       { key: "form", label: t("labs.col.on_form"), value: (row) => formatValue(row.original) },
-      { key: "range", label: t("overview.col.range"), sortable: false, value: (row) => formatRange(row.original) },
+      {
+        key: "range",
+        label: t("overview.col.range"),
+        sortable: false,
+        value: (row) => formatRange(row.original),
+        render: (row) => (formatRange(row.original)
+          ? el("span", { class: "range-cell" }, rangeBarElement(row.original, { pending: row.pending }), " ", formatRange(row.original))
+          : ""),
+      },
       {
         key: "status",
         label: t("labs.col.status"),
@@ -169,6 +188,8 @@ async function drawDetail(chartBox, toggle, data) {
     band: tokenColor("--in-range"), baseline: tokenColor("--chart-2"), pending: tokenColor("--pending"),
   });
   const instance = await drawChart(chartBox, detailOption(data, { colors: colors() }), { label: chartLabel(data) });
+  // a point opens its drawer; from the keyboard, the values table under the chart does the same
+  instance?.on("click", (params) => params.data?.point?.id && openObservation(params.data.point.id, chartBox));
   if (instance && toggle) {
     toggle.disabled = false;
     toggle.addEventListener("change", () =>
@@ -201,8 +222,9 @@ async function renderMarker(view, code) {
   const meta = [specimenWord(data.specimen), data.unit && t("labs.detail.unit", { unit: data.unit }),
     data.loinc && `LOINC ${data.loinc}`].filter(Boolean).join(" · ");
 
-  const chartBox = numeric.length || numericPending.length ? el("div", { class: "labs-chart" }) : null;
-  const textBox = texts ? el("div", { class: "labs-chart labs-chart-text" }) : null;
+  // focusable by script only: closing a drawer opened from a point gives the focus back here
+  const chartBox = numeric.length || numericPending.length ? el("div", { class: "labs-chart", tabindex: "-1" }) : null;
+  const textBox = texts ? el("div", { class: "labs-chart labs-chart-text", tabindex: "-1" }) : null;
   const toggle = el("input", { type: "checkbox", disabled: true });
   const hasBaseline = data.baseline.mean !== null && data.baseline.mean !== undefined;
 
@@ -228,8 +250,9 @@ async function renderMarker(view, code) {
   if (chartBox) await drawDetail(chartBox, hasBaseline ? toggle : null, data);
   if (textBox) {
     const { drawChart, tokenColor } = await import("../chart.js");
-    await drawChart(textBox, qualitativeOption(data, { colors: { pending: tokenColor("--pending") } }),
+    const text = await drawChart(textBox, qualitativeOption(data, { colors: { pending: tokenColor("--pending") } }),
       { label: t("labs.chart.label_text", { name: data.name, n: texts }) });
+    text?.on("click", (params) => params.data?.point?.id && openObservation(params.data.point.id, textBox));
   }
 }
 

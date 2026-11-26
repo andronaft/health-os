@@ -102,8 +102,8 @@ def read_facts(conn, user_id: str) -> dict:
     ).mappings().first()
     pending = conn.execute(
         text(
-            f"""SELECT ot.code, o.raw_name, o.value_numeric, o.comparator, o.value_text, o.unit,
-                      o.effective_at, o.status, (o.type_id IS NULL) AS unmapped,
+            f"""SELECT o.id::text AS id, ot.code, o.raw_name, o.value_numeric, o.comparator,
+                      o.value_text, o.unit, o.effective_at, o.status, (o.type_id IS NULL) AS unmapped,
                       ({UNVERIFIABLE_SQL} OR {CHECK_IMPOSSIBLE_UNMAPPED_SQL}) AS unverifiable,
                       (o.comparator IS NOT NULL) AS limit_only
                FROM observations o LEFT JOIN observation_types ot ON ot.id = o.type_id

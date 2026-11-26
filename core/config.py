@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     crisis_country: str = "UA"
     # Language of the system's own safety messages (critical values): en / uk / es.
     health_os_lang: str = "en"
+    # The user's IANA time zone (e.g. Europe/Madrid) for dates the MCP server prints as "today"
+    # (the emergency packet's "as of"). Empty: the process's zone — UTC inside Docker.
+    health_os_tz: str = ""
     # Browser UI (`make ui`): always bound to 127.0.0.1, only the port is configurable.
     ui_port: int = 8765
 
