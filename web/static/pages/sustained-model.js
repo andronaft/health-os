@@ -14,7 +14,8 @@ function contextChip(item, t) {
   if (item.kind === "workout") {
     const day = formatDate(item.day);
     return item.type && item.minutes
-      ? t("context.workout_detail", { day, type: item.type, minutes: item.minutes })
+      // "traditional_strength_training", as the importer stores Apple's type, read as words
+      ? t("context.workout_detail", { day, type: item.type.replaceAll("_", " "), minutes: item.minutes })
       : t("context.workout", { day });
   }
   if (item.kind === "beta_blocker") return t("context.beta_blocker", { name: item.name || item.atc_code });

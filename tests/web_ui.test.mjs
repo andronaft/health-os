@@ -1223,6 +1223,8 @@ test("every sustained dictionary has every word and plural form, and none of the
 test("without recorded workouts the list says step-free exercise may show up in it", () => {
   const base = { findings: [], params: SUSTAINED_PARAMS };
   assert.match(sustainedNotes({ ...base, minutes_rule: "checked", workouts_recorded: false })[0], /No workouts are recorded here/);
+  const gym = { kind: "workout", day: "2026-11-04", type: "traditional_strength_training", minutes: 50 };
+  assert.deepEqual(findingView({ ...PAIRED, context: [gym] }).chips, ["Workout on 2026-11-04: traditional strength training, 50 min"]);
   assert.match(sustainedNotes({ ...base, minutes_rule: "checked", workouts_recorded: false }, "uk")[0], /Тренувань тут не записано/);
   assert.deepEqual(sustainedNotes({ ...base, minutes_rule: "checked", workouts_recorded: true }), []);
   assert.deepEqual(sustainedNotes({ ...base, minutes_rule: "no_samples", workouts_recorded: false }), []); // Garmin only: no minutes rule
