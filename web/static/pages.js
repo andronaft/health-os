@@ -13,6 +13,7 @@ export const PAGES = [
   { id: "habits", title: "nav.habits", load: () => import("./pages/habits.js") },
   { id: "review", title: "nav.review", load: () => import("./pages/review.js") },
   { id: "report", title: "nav.report", load: () => import("./pages/report.js") },
+  { id: "emergency", title: "nav.emergency", load: () => import("./pages/emergency.js") },
 ];
 
 /**

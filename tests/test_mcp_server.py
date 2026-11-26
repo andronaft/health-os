@@ -7,9 +7,9 @@ from mcp_server.tools import medication_safety
 
 def test_server_registers_all_tools():
     names = {t.name for t in asyncio.run(mcp.list_tools())}
-    assert len(names) == 39
+    assert len(names) == 40
     assert {"get_health_summary", "stage_lab_panel", "approve_staged_source", "log_meal",
-            "check_medication_safety", "crisis_resources"} <= names
+            "check_medication_safety", "crisis_resources", "get_emergency_packet"} <= names
 
 
 def test_safety_rules_reach_the_client():

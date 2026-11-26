@@ -1391,3 +1391,104 @@ test("the charts: gaps stay empty, the norm and sodium's limit are dashed lines"
   assert.equal(salt.series[0].markLine.data[0].yAxis, 2300);
   assert.equal(salt.series[1].markLine, undefined);
 });
+
+// the emergency packet (#74) and the privacy blur (#63)
+import { NFC_TAGS, cardSides, copyText, ndefSize, nfcBudget, packetLang, tallerThanCard, utf8Size } from "../web/static/pages/emergency-model.js";
+import { hideTitles, isBlurShortcut, restoreTitles } from "../web/static/privacy.js";
+
+test("emergency: the NFC size is the NDEF text record with its wrapping, in UTF-8 bytes", () => {
+  // the same figures as core/emergency.py (tests/test_emergency.py)
+  assert.deepEqual(NFC_TAGS.map((tag) => tag.capacity), [144, 504, 888]);
+  assert.equal(ndefSize("", "en"), 10);
+  assert.equal(ndefSize("abc", "en"), 13);
+  assert.equal(ndefSize("абв", "uk"), 16);
+  assert.equal(utf8Size("ñ"), 2);
+  assert.equal(ndefSize("a".repeat(252), "en"), 1 + 3 + 3 + 1 + 255 + 1);
+  assert.equal(ndefSize("a".repeat(253), "en"), 3 + 5 + 3 + 253 + 3 + 1);
+});
+
+test("emergency: over budget is reported with the overflow, the text is never shortened", () => {
+  const edge = "a".repeat(134);
+  assert.deepEqual(nfcBudget(edge).tags.map((tag) => tag.fits), [true, true, true]);
+  const long = "Ліки: ".repeat(60);
+  const budget = nfcBudget(long, "uk");
+  assert.equal(budget.chars, [...long].length);
+  assert.equal(budget.textBytes, utf8Size(long));
+  const ntag215 = budget.tags.find((tag) => tag.tag === "NTAG215");
+  assert.equal(ntag215.fits, false);
+  assert.equal(ntag215.over, budget.size - 504);
+  assert.equal(budget.tags.find((tag) => tag.tag === "NTAG213").over, budget.size - 144);
+});
+
+test("emergency: copying falls back when the Clipboard API is missing or refuses", async () => {
+  const copied = [];
+  assert.equal(await copyText("x", { writeText: async (s) => { copied.push(s); } }, () => false), "copied");
+  assert.deepEqual(copied, ["x"]);
+  assert.equal(await copyText("y", undefined, (s) => s === "y"), "copied");
+  assert.equal(await copyText("z", { writeText: async () => { throw new Error("denied"); } }, () => true), "copied");
+  assert.equal(await copyText("z", null, () => false), "failed");
+  assert.equal(await copyText("z", null, () => { throw new Error("no execCommand"); }), "failed");
+});
+
+test("emergency: every lock-screen field lands on one side of the wallet card", () => {
+  const keys = ["conditions", "medications", "allergies", "blood_type", "emergency_contact", "notes", "new_field"];
+  const sides = cardSides(keys.map((key) => ({ key })));
+  assert.deepEqual(sides.front.map((f) => f.key), ["allergies", "blood_type", "emergency_contact"]);
+  assert.deepEqual(sides.back.map((f) => f.key), ["conditions", "medications", "notes", "new_field"]);
+  assert.equal(packetLang("es"), "es");
+  assert.equal(packetLang("de"), "en");
+});
+
+test("emergency: the page comes after the visit report", () => {
+  const ids = PAGES.map((page) => page.id);
+  assert.equal(ids.indexOf("emergency"), ids.indexOf("report") + 1);
+});
+
+test("privacy blur: Alt+Shift+B toggles, but not while typing", () => {
+  const key = (target, extra = {}) => ({ altKey: true, shiftKey: true, ctrlKey: false, metaKey: false, code: "KeyB", target, ...extra });
+  assert.equal(isBlurShortcut(key({ tagName: "BODY" })), true);
+  assert.equal(isBlurShortcut(key({ tagName: "TEXTAREA" })), false);
+  assert.equal(isBlurShortcut(key({ tagName: "DIV", isContentEditable: true })), false);
+  assert.equal(isBlurShortcut(key({ tagName: "BODY" }, { ctrlKey: true })), false);
+  assert.equal(isBlurShortcut(key({ tagName: "BODY" }, { code: "KeyN" })), false);
+});
+
+test("emergency: a card side taller than the 54 mm probe is reported, the same height is not", () => {
+  assert.equal(tallerThanCard([204.1, 204.1], 204.1), false);
+  assert.equal(tallerThanCard([204.1, 313], 204.1), true);
+  assert.equal(tallerThanCard([204.5], 204.1), false); // rounding, not overflow
+});
+
+test("privacy blur: tooltips are put aside while blurred and given back after", () => {
+  // a minimal stand-in for the DOM: elements with attributes, and SVG <title> elements with text
+  class Node {
+    constructor(localName, attrs = {}, text = "") {
+      this.localName = localName;
+      this.attrs = new Map(Object.entries(attrs));
+      this.textContent = text;
+    }
+    getAttribute(name) { return this.attrs.get(name) ?? null; }
+    setAttribute(name, value) { this.attrs.set(name, String(value)); }
+    removeAttribute(name) { this.attrs.delete(name); }
+  }
+  const year = new Node("button", { title: "1985: born, 3 records" });
+  const mark = new Node("title", {}, "Hypothyroidism · 2022-03-01");
+  const empty = new Node("title", {}, "");
+  const nodes = [year, mark, empty];
+  const root = {
+    querySelectorAll(selector) {
+      const attr = selector.match(/^\[([\w-]+)\]$/);
+      if (attr) return nodes.filter((n) => n.attrs.has(attr[1]));
+      return nodes.filter((n) => n.localName === selector);
+    },
+  };
+  hideTitles(root);
+  assert.equal(year.getAttribute("title"), null);
+  assert.equal(mark.textContent, "");
+  assert.equal(empty.getAttribute("data-privacy-title"), null);
+  hideTitles(root); // again (a redraw): nothing lost
+  restoreTitles(root);
+  assert.equal(year.getAttribute("title"), "1985: born, 3 records");
+  assert.equal(mark.textContent, "Hypothyroidism · 2022-03-01");
+  assert.equal(year.getAttribute("data-privacy-title"), null);
+});

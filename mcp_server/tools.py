@@ -499,6 +499,36 @@ def check_medication_safety(paracetamol_products: list[dict] | None = None,
                       default=str, ensure_ascii=False)
 
 
+def get_emergency_packet(layout: str = "lock_screen", lang: str = "en") -> str:
+    """The emergency packet (#74) for the lock screen or an NFC tag, from approved data only."""
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    from core.config import settings
+    from core.emergency import LAYOUTS, build, render_text
+
+    if layout not in LAYOUTS:
+        return json.dumps({"error": f"layout must be one of {', '.join(LAYOUTS)}"})
+    # "as of" is the user's day: HEALTH_OS_TZ, else this process's zone (UTC in Docker)
+    # (web/zones.py reads the browser's ?tz= the same way; web/ is not in the wheel)
+    zone = settings.health_os_tz.strip()
+    try:
+        tz = ZoneInfo(zone) if zone else None
+    except (ZoneInfoNotFoundError, ValueError):
+        return json.dumps({"error": f"HEALTH_OS_TZ={settings.health_os_tz!r} is not a time zone "
+                                    "name; use an IANA name such as Europe/Madrid, or leave it "
+                                    "empty"})
+    # main login in a read-only transaction: user_profile is not exposed to the readonly role
+    with rw_engine.connect() as conn:
+        conn.execute(text("SET TRANSACTION READ ONLY"))
+        packet = build(conn, lang, tz)
+    out = {"layout": layout, "lang": packet["lang"], "as_of": packet["as_of"],
+           "empty": packet["empty"], "text": render_text(packet, layout),
+           "notice": packet["notice"], "privacy": packet["privacy"]}
+    if not packet["empty"]:
+        out[layout] = packet[layout]
+    return json.dumps(out, default=str, ensure_ascii=False)
+
+
 def crisis_resources(message: str = "") -> str:
     """Fixed crisis response (no model judgement, works offline). Includes the user's trusted
     contact from the profile, if set."""

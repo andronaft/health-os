@@ -310,6 +310,21 @@ def prepare_doctor_visit(specialty: str = "") -> str:
 
 @mcp.tool(annotations=READ)
 @_db_guard
+def get_emergency_packet(layout: str = "lock_screen", lang: str = "en") -> str:
+    """Emergency packet for a paramedic, from approved data only, for the user to copy by hand
+    (health-os never writes to the phone or a tag). layout "lock_screen": one block per Medical ID
+    field (conditions, medications, allergies & reactions, blood type, emergency contact, notes),
+    for iOS Medical ID / Android "Emergency information". layout "nfc": one text block for an NFC
+    tag with its size in bytes against NTAG213/215/216 (144/504/888 bytes); over budget it says so
+    and is never cut. lang: en / uk / es. Unverified allergies are included and marked; stopped
+    medications and resolved or refuted diagnoses are left out. Give the text as is, with its
+    privacy note: anyone holding the phone or tag can read it. Never shorten it yourself — the
+    user decides what to leave out."""
+    return tools.get_emergency_packet(layout, lang)
+
+
+@mcp.tool(annotations=READ)
+@_db_guard
 def get_weekly_report() -> str:
     """Deterministic report for the last 7 days: newly added values, abnormal approved values,
     top nutrient deficiencies/excesses from the food log, and system health (review-queue size,
