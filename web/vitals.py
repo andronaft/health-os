@@ -25,6 +25,7 @@ from sqlalchemy import text
 
 from core import queries as q
 from safety.critical_values import LANGUAGES
+from web.zones import parse_tz  # noqa: F401  (re-exported for callers of this module)
 
 WINDOWS = (7, 30, 90, 365, 1825)
 DEFAULT_WINDOW = 30
@@ -103,15 +104,6 @@ def session_of(hour: int) -> str:
     return "other"
 
 
-def parse_tz(value: str | None) -> tzinfo | None:
-    """The `tz` query parameter: an IANA zone name ("Europe/Madrid") or nothing (the database's
-    zone). ValueError for anything else."""
-    if not value:
-        return None
-    try:
-        return ZoneInfo(value)
-    except (ZoneInfoNotFoundError, ValueError) as e:
-        raise ValueError(f"unknown time zone {value!r}") from e
 
 
 def _db_zone(conn) -> ZoneInfo:
