@@ -1902,6 +1902,11 @@ tbody tr:last-child td {
   gap: 0.35rem;
 }
 
+.sustained-note {
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--border);
+}
+
 .sustained-chip {
   padding: 0 0.5rem;
   border: 1px solid var(--border);

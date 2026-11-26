@@ -48,6 +48,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   of the weekly report (which is then not "stable"), and on the Vitals page as a short "Worth
   checking" list (English, Ukrainian, Spanish) with the days shaded on the watch's charts, in the
   browser's time zone. No push alerts. The demo watch has one such episode, 20–23 days ago.
+  The Apple Health import now also stores workouts (`physical_activities`, once each across
+  re-imports), resting heart rate and HRV as SDNN (a type of its own, `hrv_sdnn`, never mixed
+  with Garmin's RMSSD-based HRV) as daily values. With no workout recorded at all, the result
+  and the page say that step-free exercise can't be told from sitting still. The demo has a
+  weekly ride and gym session.
 
 ### Added
 - Browser UI: the Vitals page (#56). Home blood pressure is checked against the ESH home
