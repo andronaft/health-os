@@ -28,6 +28,9 @@ from xml.etree import ElementTree as ET
 HK_QUANTITY = {
     "HKQuantityTypeIdentifierHeartRate": ("heart_rate", "avg"),
     "HKQuantityTypeIdentifierRestingHeartRate": ("resting_hr", "avg"),
+    # Apple's HRV is SDNN; Garmin's overnight HRV is RMSSD-based: two measures, two codes, never
+    # one baseline (#75)
+    "HKQuantityTypeIdentifierHeartRateVariabilitySDNN": ("hrv_sdnn", "avg"),
     "HKQuantityTypeIdentifierStepCount": ("steps", "sum"),
     "HKQuantityTypeIdentifierOxygenSaturation": ("spo2", "avg"),
     "HKQuantityTypeIdentifierBodyMass": ("body_weight", "last"),
@@ -39,6 +42,7 @@ HK_QUANTITY = {
 HK_UNITS = {
     "heart_rate": {"count/min": lambda v: v},
     "resting_hr": {"count/min": lambda v: v},
+    "hrv_sdnn": {"ms": lambda v: v},
     "steps": {"count": lambda v: v},
     # Apple stores SpO2 as a fraction 0..1 with unit "%"; older exports may hold 0..100
     "spo2": {"%": lambda v: v * 100.0 if v <= 1.0 else v},
@@ -76,9 +80,49 @@ def _parse_ts(s: str) -> datetime:
 
 
 @dataclass
+class Workout:
+    """A recorded workout (Apple's <Workout>): what heart rate is expected to be high in."""
+    activity_type: str          # "cycling", from HKWorkoutActivityTypeCycling
+    start: datetime
+    end: datetime | None
+    minutes: int | None         # end − start, else the record's own duration in minutes
+    source: str | None          # the app or device that recorded it
+
+
+# Apple writes a workout's duration in its durationUnit; minutes are what is stored
+_DURATION_TO_MINUTES = {"min": 1.0, "s": 1 / 60, "hr": 60.0, "h": 60.0}
+
+
+def _activity_type(raw: str | None) -> str:
+    name = (raw or "").removeprefix("HKWorkoutActivityType") or "other"
+    # "TraditionalStrengthTraining" → "traditional_strength_training"
+    return "".join(f"_{c.lower()}" if c.isupper() else c for c in name).lstrip("_")
+
+
+def _workout(el) -> Workout | None:
+    start = el.get("startDate")
+    if not start:
+        return None
+    begin = _parse_ts(start)
+    end = _parse_ts(el.get("endDate")) if el.get("endDate") else None
+    minutes = None
+    if end is not None and end > begin:
+        minutes = round((end - begin).total_seconds() / 60)
+    else:
+        try:
+            factor = _DURATION_TO_MINUTES.get(el.get("durationUnit") or "min")
+            minutes = round(float(el.get("duration")) * factor) if factor else None
+        except (TypeError, ValueError):
+            minutes = None
+    return Workout(_activity_type(el.get("workoutActivityType")), begin, end, minutes,
+                   el.get("sourceName"))
+
+
+@dataclass
 class ParsedExport:
     samples: list[Sample] = field(default_factory=list)
     alerts: list[DeviceAlert] = field(default_factory=list)
+    workouts: list[Workout] = field(default_factory=list)
     # (type_code, unit as written or None) → number of records skipped for an unknown unit
     skipped_units: Counter = field(default_factory=Counter)
 
@@ -87,6 +131,12 @@ def parse(xml: str) -> ParsedExport:
     """Parses export.xml; quantity values come out in canonical units (see `HK_UNITS`)."""
     out = ParsedExport()
     for _event, el in ET.iterparse(io.StringIO(xml), events=("end",)):
+        if el.tag == "Workout":
+            workout = _workout(el)
+            if workout is not None:
+                out.workouts.append(workout)
+            el.clear()
+            continue
         if el.tag != "Record":
             continue
         rtype = el.get("type")

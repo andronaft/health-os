@@ -54,6 +54,12 @@ def test_a_limit_that_cannot_reach_a_critical_zone_is_fine():
     (">", 2, 0, 5, None),            # in range or high: not a guess
     ("<", 160, 150, 400, None),      # low or in range
     (">", 1.5, 1.2, None, "normal"),
+    (">", 500, 30, 500, "high"),     # past the top: above it
+    (">=", 500, 30, 500, None),      # may be exactly 500, in range
+    (">=", 501, 30, 500, "high"),
+    ("<", 150, 150, 400, "low"),
+    ("<=", 150, 150, 400, None),     # may be exactly 150, in range
+    ("<=", 149, 150, 400, "low"),
     (None, 3.0, 1, 5, "normal"),
 ])
 def test_a_limit_has_a_status_only_when_the_limit_decides_it(comparator, value, low, high, expected):

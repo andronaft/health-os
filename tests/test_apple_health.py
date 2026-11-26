@@ -71,3 +71,30 @@ def test_unknown_unit_is_skipped_and_counted(hk_type, unit, code):
     p = parse(_record(hk_type, unit, 100))
     assert p.samples == []
     assert p.skipped_units == {(code, unit): 1}
+
+
+# --- workouts and the baselines' inputs (#75) ---------------------------------------------------
+_WORKOUTS = """<HealthData>
+  <Workout workoutActivityType="HKWorkoutActivityTypeCycling" duration="45.5" durationUnit="min"
+           sourceName="Apple Watch" startDate="2026-11-10 18:00:00 +0100" endDate="2026-11-10 18:46:00 +0100">
+    <WorkoutStatistics type="HKQuantityTypeIdentifierHeartRate" startDate="2026-11-10 18:00:00 +0100"/>
+  </Workout>
+  <Workout workoutActivityType="HKWorkoutActivityTypeTraditionalStrengthTraining" duration="1.5"
+           durationUnit="hr" startDate="2026-11-11 07:00:00 +0100"/>
+  <Workout workoutActivityType="HKWorkoutActivityTypeRowing" startDate="2026-11-12 07:00:00 +0100"/>
+  <Record type="HKQuantityTypeIdentifierHeartRateVariabilitySDNN" unit="ms" startDate="2026-11-10 07:00:00 +0100" value="38.5"/>
+  <Record type="HKQuantityTypeIdentifierRestingHeartRate" unit="count/min" startDate="2026-11-10 07:00:00 +0100" value="57"/>
+</HealthData>"""
+
+
+def test_workouts_are_parsed_with_type_start_and_minutes():
+    ride, gym, row = parse(_WORKOUTS).workouts
+    assert (ride.activity_type, ride.minutes, ride.source) == ("cycling", 46, "Apple Watch")  # end − start
+    assert ride.start.isoformat() == "2026-11-10T18:00:00+01:00"
+    assert (gym.activity_type, gym.minutes, gym.end) == ("traditional_strength_training", 90, None)  # 1.5 hr
+    assert (row.activity_type, row.minutes) == ("rowing", None)  # neither an end nor a duration
+
+
+def test_apple_hrv_is_sdnn_and_kept_apart_from_garmins_hrv():
+    samples = {s.type_code: s.value for s in parse(_WORKOUTS).samples}
+    assert samples == {"hrv_sdnn": 38.5, "resting_hr": 57.0}

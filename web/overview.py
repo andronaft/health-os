@@ -92,8 +92,8 @@ def _tile(conn, uid, tile: str, codes: tuple, averaged: bool, latest: dict, name
 
 
 def _marker_row(m: dict, names: dict) -> dict:
-    return {"code": m["type_code"], "name": names.get(m["type_code"], m["type_code"]),
-            "category": m["category"],
+    return {"id": m["id"], "code": m["type_code"],
+            "name": names.get(m["type_code"], m["type_code"]), "category": m["category"],
             "value": _number(m["value_numeric"]), "comparator": m["comparator"],
             "text": m["value_text"], "unit": m["unit"], "ref_min": _number(m["ref_min"]),
             "ref_max": _number(m["ref_max"]), "status": m["status"], "at": m["effective_at"]}
@@ -109,7 +109,8 @@ def _out_row(m: dict, names: dict, still_open: dict | None) -> dict:
 
 
 def _pending_row(p, names: dict) -> dict:
-    return {"code": p["code"], "name": names.get(p["code"]) or p["raw_name"] or p["code"],
+    return {"id": p["id"], "code": p["code"],
+            "name": names.get(p["code"]) or p["raw_name"] or p["code"],
             "raw_name": p["raw_name"], "value": _number(p["value_numeric"]),
             "comparator": p["comparator"], "text": p["value_text"], "unit": p["unit"],
             "at": p["effective_at"], "critical": p["status"] == "critical",
@@ -130,7 +131,8 @@ def _critical(markers: list[dict], pending, names: dict, lang: str, conn,
     rows = [{**_marker_row(m, names), "pending": False, "unverifiable": False,
              "message": message_for(m["type_code"], message_uk.get(m["type_code"]), lang)}
             for m in wanted]
-    rows += [{"code": u["code"], "name": names.get(u["code"], u["code"]), "category": "lab",
+    rows += [{"id": u["observation_id"], "code": u["code"],
+              "name": names.get(u["code"], u["code"]), "category": "lab",
               "value": u["value"], "comparator": u["comparator"], "text": None,
               "unit": u["unit"], "at": u["effective_at"], "pending": False,
               "unverifiable": True, "limit": u["comparator"] is not None, "message": None}

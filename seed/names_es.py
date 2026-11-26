@@ -180,6 +180,7 @@ OBSERVATION_NAMES_ES = {
     # wearables
     "resting_hr": "Frecuencia cardíaca en reposo",
     "hrv": "Variabilidad de la frecuencia cardíaca (VFC)",
+    "hrv_sdnn": "Variabilidad de la frecuencia cardíaca, SDNN (Apple)",
     "stress_avg": "Nivel medio de estrés",
     "body_battery_high": "Body Battery (máximo del día)",
     "body_battery_low": "Body Battery (mínimo del día)",

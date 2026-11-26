@@ -1,4 +1,6 @@
 """Integration test of the Apple Health importer (committed data, cleanup in finally)."""
+from datetime import UTC, datetime
+
 import pytest
 from sqlalchemy import text
 
@@ -91,3 +93,39 @@ def test_record_units_are_converted_and_unknown_ones_reported(conn, user_id):
     assert out["skipped_unknown_unit"] == [{"type_code": "body_weight", "unit": "oz", "records": 1}]
     assert "1 record(s) skipped" in out["note"]
     assert out["daily_observations"] == 2
+
+
+_XML_BASELINES = """<?xml version="1.0"?><HealthData>
+  <Record type="HKQuantityTypeIdentifierRestingHeartRate" unit="count/min" startDate="2024-02-01 07:00:00 +0200" value="57"/>
+  <Record type="HKQuantityTypeIdentifierHeartRateVariabilitySDNN" unit="ms" startDate="2024-02-01 07:00:00 +0200" value="38"/>
+  <Workout workoutActivityType="HKWorkoutActivityTypeCycling" duration="40" durationUnit="min"
+           sourceName="Apple Watch" startDate="2024-02-01 18:00:00 +0200" endDate="2024-02-01 18:40:00 +0200"/>
+</HealthData>"""
+
+
+def test_resting_hr_hrv_sdnn_and_workouts_are_imported_once():
+    """#75: Apple resting HR and HRV (SDNN, its own code) become daily values for the baselines;
+    workouts land in physical_activities once, however often the cumulative export is imported."""
+    with engine.begin() as conn:
+        uid = get_or_create_user(conn)
+        out1 = import_apple_health(conn, uid, _XML_BASELINES)
+    with engine.begin() as conn:
+        out2 = import_apple_health(conn, uid, _XML_BASELINES)
+    sid = out1["source_id"]
+    try:
+        assert out1["workouts"] == 1 and out2["workouts"] == 0
+        with engine.connect() as conn:
+            values = dict(conn.execute(text(
+                """SELECT ot.code, o.value_canonical::float FROM observations o
+                   JOIN observation_types ot ON ot.id = o.type_id WHERE o.source_id = :s"""),
+                {"s": sid}).all())
+            assert values == {"resting_hr": 57.0, "hrv_sdnn": 38.0}
+            [workout] = conn.execute(text(
+                """SELECT activity_type, duration_minutes, activity_date, raw_data->>'source'
+                   FROM physical_activities WHERE source_id = :s"""), {"s": sid}).all()
+            assert workout[:2] == ("cycling", 40) and workout[3] == "Apple Watch"
+            assert workout[2] == datetime(2024, 2, 1, 16, tzinfo=UTC)  # 18:00 +02:00
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM physical_activities WHERE source_id=:s"), {"s": sid})
+        _cleanup(uid, sid)

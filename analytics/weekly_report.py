@@ -81,8 +81,18 @@ def build(conn, user_id: str, days: int = 7) -> dict:
         "top_excess": nut["excess"][:3],
     }
 
+    # wearable changes that lasted (#75): worth checking, so the week is not "stable"
+    from datetime import timedelta
+
+    from analytics import sustained as _sustained
+    today = conn.execute(text("SELECT now()")).scalar().astimezone(_sustained.db_zone(conn)).date()
+    lasting = _sustained.find(conn, user_id, today - timedelta(days=days - 1), today)
+    sustained_block = {"findings": lasting["findings"], "limits": lasting["limits"],
+                       "wording": lasting["wording"]}
+
     return {
         "period_days": days,
+        "sustained": sustained_block,
         "new_values": [dict(r) for r in new_values],
         "abnormal": [dict(r) for r in abnormal],
         "alarming_pending": alarming,
@@ -100,5 +110,6 @@ def build(conn, user_id: str, days: int = 7) -> dict:
                      "Pending queue is large — risk of 'rubber-stamp ok' (kill criterion)."
                      if (pending_q or 0) >= 10 else "Pending queue is normal."),
         },
-        "stable": not abnormal and not alarming and not unverifiable and (pending_q or 0) < 10,
+        "stable": not abnormal and not alarming and not unverifiable and (pending_q or 0) < 10
+        and not lasting["findings"],
     }

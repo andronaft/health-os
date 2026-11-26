@@ -3,6 +3,8 @@
 
 import { api } from "../api.js";
 import { dataTable, el, formatDate, formatRange, formatValue, statusPill } from "../components.js";
+import { valueButton, valueCell } from "./observation.js";
+import { rangeBarElement } from "./range-bar.js";
 import { LANG, t } from "../strings.js";
 import {
   allergyText, chartLabel, coverageLines, diagnosisText, eventDetails, habitText, kindWord,
@@ -20,7 +22,7 @@ const quiet = (text) => el("p", { class: "quiet" }, text);
 function criticalRow(row) {
   return el("li", { class: "critical-row" },
     el("p", { class: "critical-value" },
-      el("strong", { class: row.pending ? "value-pending" : null }, `${row.name} ${formatValue(row)}`),
+      valueButton(row.id, el("strong", { class: row.pending ? "value-pending" : null }, `${row.name} ${formatValue(row)}`)),
       " · ",
       el("span", { class: "nowrap" }, formatDate(row.at)),
       " ",
@@ -87,7 +89,7 @@ function pendingPart({ total, rows }) {
         key: "value",
         label: t("overview.col.value"),
         numeric: true,
-        render: (row) => el("span", { class: "value-pending" }, formatValue(row)),
+        render: (row) => valueCell(row, { pending: true }),
         text: formatValue,
       },
       { key: "status", label: t("overview.col.status"), sortable: false, value: () => t("status.pending"), render: () => statusPill("pending") },
@@ -121,9 +123,17 @@ function outOfRangePart(rows, { in_range: inRange }) {
         label: t("overview.col.marker"),
         render: (row) => (markerHref(row) ? el("a", { href: markerHref(row) }, row.name) : row.name),
       },
-      { key: "value", label: t("overview.col.value"), numeric: true, render: formatValue, text: formatValue },
+      { key: "value", label: t("overview.col.value"), numeric: true, render: (row) => valueCell(row), text: formatValue },
       { key: "status", label: t("overview.col.status"), render: (row) => statusPill(row.status) },
-      { key: "range", label: t("overview.col.range"), value: formatRange, sortable: false },
+      {
+        key: "range",
+        label: t("overview.col.range"),
+        value: formatRange,
+        sortable: false,
+        render: (row) => (formatRange(row)
+          ? el("span", { class: "range-cell" }, rangeBarElement(row), " ", formatRange(row))
+          : ""),
+      },
       { key: "at", label: t("overview.col.date"), render: (row) => formatDate(row.at) },
       { key: "note", label: t("overview.col.note"), wrap: true, sortable: false, value: outNote },
     ],

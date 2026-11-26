@@ -5,6 +5,7 @@ import { el, emptyState, errorState } from "./components.js";
 import { PAGES, parseRoute } from "./pages.js";
 import { t } from "./strings.js";
 import { setUpThemePicker } from "./theme.js";
+import { setUpPrivacyBlur } from "./privacy.js"; // privacy blur (#63)
 
 const main = document.getElementById("main");
 const navLinks = new Map();
@@ -157,6 +158,7 @@ async function showStatus() {
 
 buildNav();
 setUpThemePicker(document.getElementById("theme-picker"));
+setUpPrivacyBlur(document.getElementById("privacy-toggle")); // privacy blur (#63)
 render(currentRoute());
 showStatus();
 

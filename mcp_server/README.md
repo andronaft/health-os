@@ -57,11 +57,12 @@ trend over 2 years", "what is pending review", "what did I eat this week and wha
 | get_health_summary | deterministic summary: profile, allergies, diagnoses, medications, how recent labs are |
 | query_observations | values of a marker over N days; >90 days → weekly aggregation |
 | get_trend | marker trend (Mann-Kendall) with significance |
-| get_anomalies | latest values that deviate from your own earlier values (personal baseline) |
+| get_anomalies | latest values that deviate from your own earlier values (personal baseline); `sustained`: resting HR / HRV changes that last 3+ days, still minutes of high heart rate (#75) |
 | get_timeline | chronology of health events |
 | get_medications / get_diagnoses / get_allergies | current entities |
 | get_screening_recommendations | age/sex-gated screening calendar |
 | prepare_doctor_visit | summary + recent abnormalities + due screenings + pending queue |
+| get_emergency_packet | lock-screen Medical ID fields or NFC-tag text (size vs NTAG213/215/216, never cut), approved data only, en/uk/es |
 | get_weekly_report | deterministic weekly report |
 | query_food / query_nutrition / nutrition_report | food log, daily nutrients vs RDA, deficiency/excess analytics |
 | list_meal_templates | saved frequent meals |

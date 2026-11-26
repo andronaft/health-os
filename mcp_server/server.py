@@ -247,7 +247,20 @@ def get_anomalies(type_code: str = "", days: int = 90, z_threshold: float = 2.0)
     to 90 previous values) and lists those beyond z_threshold (default 2), largest first. Skips
     markers with fewer than 5 earlier values. Useful for wearables (HRV, resting HR, sleep) and
     long lab histories. type_code: limit to one marker. A deviation from the user's own history
-    is not a diagnosis — present it as "worth repeating / discussing", never as alarming."""
+    is not a diagnosis — present it as "worth repeating / discussing", never as alarming.
+
+    `sustained`: wearable changes that LASTED, ending in the last `days` — resting HR up or HRV
+    down 3+ days in a row against the median and spread of the 60 days before (reported
+    together when they share days), and heart rate 30+ bpm above the resting median for 20+
+    minutes with no steps and no workout (Apple Health raw samples only). Context (a workout
+    those days, a current beta blocker) is listed; it doesn't change the rule. Thresholds are
+    initial defaults, to be reviewed. Present these as "worth checking", never as alarming. What
+    the rule can't see: no ECG, wrist sensors only; days and minutes when the watch was off are
+    gaps, not normal days; fewer than 30 days of values in the 60 before → nothing is checked;
+    with no workout recorded at all, step-free exercise (cycling, rowing, gym) can't be told from
+    sitting still (`sustained.notes` says so). Sources: Garmin's daily import → resting HR and
+    HRV (RMSSD-based), days rule only; Apple Health → resting HR and HRV SDNN (`hrv_sdnn`, its own
+    baseline) for the days rule, raw heart rate, steps and workouts for the minutes rule."""
     return tools.get_anomalies(type_code, days, z_threshold)
 
 
@@ -306,6 +319,21 @@ def prepare_doctor_visit(specialty: str = "") -> str:
     the user asks "what should I tell my doctor". specialty: optional label echoed in the output
     (content is not filtered by specialty yet)."""
     return tools.prepare_doctor_visit(specialty)
+
+
+@mcp.tool(annotations=READ)
+@_db_guard
+def get_emergency_packet(layout: str = "lock_screen", lang: str = "en") -> str:
+    """Emergency packet for a paramedic, from approved data only, for the user to copy by hand
+    (health-os never writes to the phone or a tag). layout "lock_screen": one block per Medical ID
+    field (conditions, medications, allergies & reactions, blood type, emergency contact, notes),
+    for iOS Medical ID / Android "Emergency information". layout "nfc": one text block for an NFC
+    tag with its size in bytes against NTAG213/215/216 (144/504/888 bytes); over budget it says so
+    and is never cut. lang: en / uk / es. Unverified allergies are included and marked; stopped
+    medications and resolved or refuted diagnoses are left out. Give the text as is, with its
+    privacy note: anyone holding the phone or tag can read it. Never shorten it yourself — the
+    user decides what to leave out."""
+    return tools.get_emergency_packet(layout, lang)
 
 
 @mcp.tool(annotations=READ)

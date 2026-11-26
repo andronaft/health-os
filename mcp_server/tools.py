@@ -210,7 +210,22 @@ def get_anomalies(type_code: str = "", days: int = 90, z_threshold: float = 2.0)
     """For every marker whose latest approved value falls in the last `days`, compare that value
     with the personal baseline built from the marker's earlier values (up to the 90 before it).
     Deterministic (analytics.baselines); a marker with fewer than 5 earlier values is skipped,
-    and so are personal records (pr_*), which only ever improve."""
+    and so are personal records (pr_*), which only ever improve.
+
+    `sustained` (#75): wearable changes that LAST, ending in the last `days` — resting heart
+    rate up or HRV down for 3+ days in a row against the median and spread of the 60 days
+    before (both together when they share days), and heart rate 30+ bpm above the resting
+    median for 20+ minutes with no steps and no workout (Apple Health raw samples only). Each
+    lists context (a workout those days, a current beta blocker) without changing the rule. The
+    thresholds are initial defaults, to be reviewed (`sustained.params`). Word them as "worth
+    checking", never as alarming. What the rule can't see: there is no ECG, only wrist sensors;
+    days and minutes when the watch was off are gaps, not normal days; and with fewer than 30
+    days of values in the 60 before, nothing is checked; without any recorded workout, step-free
+    exercise (cycling, rowing, gym) can't be told from sitting still (`sustained.notes` says so).
+    Sources: Garmin's daily import gives resting HR and HRV (RMSSD-based) — the days rule only;
+    Apple Health gives resting HR and HRV as SDNN (`hrv_sdnn`, its own baseline) — the days rule —
+    and raw heart rate, steps and workouts — the minutes rule. If the check itself fails,
+    `sustained.error` says so and the rest of the result stands."""
     from datetime import UTC, datetime, timedelta
 
     from analytics.baselines import check_anomaly
@@ -257,12 +272,39 @@ def get_anomalies(type_code: str = "", days: int = 90, z_threshold: float = 2.0)
                               "z": round(res.z, 2) if res.z is not None else None,
                               "detail": res.detail})
     anomalies.sort(key=lambda a: -abs(a["z"] or 0))
+    try:
+        sustained = _sustained(code, days)
+    except Exception as e:  # noqa: BLE001 — the latest-value check above must still be returned
+        sustained = {"findings": [], "error": f"the sustained check failed: {type(e).__name__}: {e}"}
     return json.dumps({"window_days": days, "z_threshold": z_threshold,
                        "markers_checked": checked, "skipped_short_history": too_short,
-                       "anomalies": anomalies, **missing,
+                       "anomalies": anomalies, **missing, "sustained": sustained,
                        "caveat": ("A deviation from YOUR earlier values, not a diagnosis; it can "
                                   "be noise, a lab change or a real change — repeat or discuss.")},
                       default=str, ensure_ascii=False)
+
+
+# ---- sustained deviations (#75), the "sustained" section of get_anomalies
+def _sustained(code: str, days: int) -> dict:
+    """Runs on the main login (device_samples and workouts are base tables the read-only login
+    can't read), in a read-only transaction. Days are the database's: MCP has no browser zone."""
+    from datetime import timedelta
+
+    from analytics import sustained
+    from analytics.baselines import HR_CODES
+
+    if code and code not in HR_CODES:
+        return {"findings": [], "note": f"only {', '.join(HR_CODES)} have a sustained rule"}
+    with rw_engine.connect() as conn:
+        conn.execute(text("SET TRANSACTION READ ONLY"))
+        uid = _user_id(conn)
+        today = conn.execute(text("SELECT now()")).scalar().astimezone(sustained.db_zone(conn)).date()
+        out = sustained.find(conn, uid, today - timedelta(days=days - 1), today)
+    if code:
+        out["findings"] = [f for f in out["findings"]
+                           if (code == "heart_rate" and f["kind"] == "minutes")
+                           or any(m["code"] == code for m in f.get("metrics", []))]
+    return out
 
 
 def check_data_quality() -> str:
@@ -497,6 +539,36 @@ def check_medication_safety(paracetamol_products: list[dict] | None = None,
         ).mappings()] if uid else []
     return json.dumps(medication_safety(meds, paracetamol_products, taking_biotin, planned_tests),
                       default=str, ensure_ascii=False)
+
+
+def get_emergency_packet(layout: str = "lock_screen", lang: str = "en") -> str:
+    """The emergency packet (#74) for the lock screen or an NFC tag, from approved data only."""
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    from core.config import settings
+    from core.emergency import LAYOUTS, build, render_text
+
+    if layout not in LAYOUTS:
+        return json.dumps({"error": f"layout must be one of {', '.join(LAYOUTS)}"})
+    # "as of" is the user's day: HEALTH_OS_TZ, else this process's zone (UTC in Docker)
+    # (web/zones.py reads the browser's ?tz= the same way; web/ is not in the wheel)
+    zone = settings.health_os_tz.strip()
+    try:
+        tz = ZoneInfo(zone) if zone else None
+    except (ZoneInfoNotFoundError, ValueError):
+        return json.dumps({"error": f"HEALTH_OS_TZ={settings.health_os_tz!r} is not a time zone "
+                                    "name; use an IANA name such as Europe/Madrid, or leave it "
+                                    "empty"})
+    # main login in a read-only transaction: user_profile is not exposed to the readonly role
+    with rw_engine.connect() as conn:
+        conn.execute(text("SET TRANSACTION READ ONLY"))
+        packet = build(conn, lang, tz)
+    out = {"layout": layout, "lang": packet["lang"], "as_of": packet["as_of"],
+           "empty": packet["empty"], "text": render_text(packet, layout),
+           "notice": packet["notice"], "privacy": packet["privacy"]}
+    if not packet["empty"]:
+        out[layout] = packet[layout]
+    return json.dumps(out, default=str, ensure_ascii=False)
 
 
 def crisis_resources(message: str = "") -> str:

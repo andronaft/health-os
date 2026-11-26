@@ -16,6 +16,43 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   that names the page. Charts share one ECharts theme drawn from the same tokens in both themes.
 
 ### Added
+- Emergency packet (#74): `core/emergency.py` builds, from approved data only and with no model,
+  what a paramedic can read without unlocking the phone — allergies with reaction and severity
+  (unverified ones included and marked), current medications with dose, active diagnoses (a
+  suspected or provisional one says so; resolved and refuted ones are left out), blood type,
+  emergency contact, "as of <date>" and a fixed line that it comes from a personal record, not a
+  clinical system. Two layouts: one block per lock-screen Medical ID field, and one NFC-tag text
+  with its size (the NDEF text record as written) against NTAG213/215/216 user memory (144/504/888
+  bytes, NXP data sheet §8.5); over budget it says by how much and never cuts anything. New MCP read
+  tool `get_emergency_packet(layout, lang)` (en/uk/es) — 40 tools — and `GET /api/v1/emergency`.
+  A diagnosis with no certainty recorded says so (never passes as confirmed); a blood type whose
+  sign the stored Rh contradicts is shown with both, to be checked. The MCP tool's "as of" date is
+  the day in the new optional `HEALTH_OS_TZ` (else the process's zone; the UI sends the browser's).
+- Browser UI: the **Emergency** page — a copy button per Medical ID field (Clipboard API, with a
+  fallback that selects the text), the NFC text with a live byte counter per tag (edit it here to
+  shorten it yourself), and a printable wallet card: two credit-card sides (85.6 × 54 mm) that fold
+  once, printed alone on the page; a card too full is never clipped: it prints taller and says so,
+  on screen and on the paper. Its language is chosen
+  apart from the UI's. A privacy warning says the lock screen and a tag are readable by anyone.
+- Browser UI: privacy blur (#63). A "Blur values" switch in the header (or Alt+Shift+B) blurs
+  values, dates and names on every page, charts included, for screenshots and demos: everything a
+  page shows is blurred by default, its headings, controls and marked notes (class `public`) are not,
+  so a new page is covered without being listed. Tooltips are put aside while it is on; prints are
+  never blurred. The critical-values alert stays visible with only its value blurred. Remembered in
+  this browser.
+- Browser UI: "where does this value come from". A click on, or Enter on, any lab value (the
+  Labs table, the panel matrix, a marker's values table and chart points, the Overview tables)
+  opens a drawer (a bottom sheet on a phone) for that one observation: the value as printed on
+  the form and the canonical value it was converted to, with the factor, or plainly "not
+  converted"; the range and where it came from (the form, or none on it — the catalog's general
+  range is shown apart, as a hint no status came from); the review status, how it came in and
+  when it was approved; the notes verbatim; the document and the panel, with the panel's other
+  values. A pending value says it is not a fact yet. New endpoint `GET /api/v1/observations/{id}`
+  (only the user's own live rows; anything else is 404).
+- Browser UI: a range bar (#64) beside each value in the Labs and Overview tables and in the
+  drawer: below / inside / above the form's range, an open side for a missing min or max, an
+  arrow for a value far off the bar or a limit like ">600" (above only when the limit itself is
+  past the range). Its words are in an accessible label; light, dark and print.
 - Browser UI: the medical-record pages (#57). **Timeline**: the whole record on one axis, in
   lanes (diagnoses; visits, procedures and hospital stays; lab panels; vaccinations; documents),
   with medications and habits drawn as bars from start to stop (to today while ongoing). A
@@ -47,6 +84,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   Every printed page ends with how many approved values the report was made from, that it is not
   a medical document and that pending values are not included. New endpoint
   `GET /api/v1/report?lang=…&since=YYYY-MM-DD`.
+- Sustained deviations from the personal baseline (#75): resting heart rate up or HRV down for
+  3+ days in a row against the median and spread of the 60 days before (both reported together
+  when they share days; a missing day ends a run), and heart rate 30+ bpm above the resting
+  median for 20+ still minutes with no steps and no workout (Apple Health raw samples). A
+  workout on those days or a current beta blocker (ATC C07) is listed as context, never used to
+  change the rule. The thresholds are initial defaults, to be reviewed, in one place
+  (`analytics/baselines.py`). Shown as a `sustained` section of `get_anomalies` (no new tool) and
+  of the weekly report (which is then not "stable"), and on the Vitals page as a short "Worth
+  checking" list (English, Ukrainian, Spanish) with the days shaded on the watch's charts, in the
+  browser's time zone. No push alerts. The demo watch has one such episode, 20–23 days ago.
+  The Apple Health import now also stores workouts (`physical_activities`, once each across
+  re-imports), resting heart rate and HRV as SDNN (a type of its own, `hrv_sdnn`, never mixed
+  with Garmin's RMSSD-based HRV) as daily values. With no workout recorded at all, the result
+  and the page say that step-free exercise can't be told from sitting still. The demo has a
+  weekly ride and gym session.
 
 ### Added
 - Browser UI: the Vitals page (#56). Home blood pressure is checked against the ESH home

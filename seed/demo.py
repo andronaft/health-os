@@ -228,6 +228,9 @@ def bp_dated(today: date) -> list[tuple[date, int, int]]:
 WEARABLE_DAYS = 365
 # days without the watch: a week on holiday and a few scattered days
 WEARABLE_GAPS = set(range(130, 139)) | {12, 47, 88, 201, 260, 300}
+# a lasting change from the usual (#75), as a cold might bring: days ago → (resting HR up in bpm,
+# HRV down in ms). Four days of both, with HRV back a day earlier.
+WEARABLE_EPISODE = {23: (7, 13), 22: (9, 15), 21: (8, 12), 20: (6, 0)}
 
 
 def wearable_days(today: date) -> list[tuple[date, dict[str, float]]]:
@@ -259,6 +262,10 @@ def wearable_days(today: date) -> list[tuple[date, dict[str, float]]]:
             "body_battery_low": max(5, min(60, round(22 + 10 * _noise(ago, 12)))),
             "intensity_minutes": max(0, round(25 + 20 * season + 30 * _noise(ago, 13))),
         }
+        if ago in WEARABLE_EPISODE:
+            up, down = WEARABLE_EPISODE[ago]
+            values["resting_hr"] += up
+            values["hrv"] -= down
         if day.weekday() == 0:  # the watch re-estimates VO2max about once a week
             values["vo2max"] = round(38 + 3 * fit + 0.6 * _noise(ago, 14), 1)
         out.append((day, values))
@@ -281,6 +288,34 @@ def _load_wearables(conn, uid: str, today: date) -> None:
            SELECT :u, :tid, :eff, 'date', :v, :v, ot.canonical_unit, NULL, 'approved', :sid,
                   'daily_aggregate'
            FROM observation_types ot WHERE ot.id = :tid"""), rows)
+
+
+# the watch's recorded workouts (#75): (weekday, hour, type, minutes) — a ride on Saturdays and a
+# step-free gym session on Wednesdays, the kind of exercise the "still minutes" rule must not
+# count as sitting with a high heart rate
+DEMO_WORKOUTS = [(5, 9, "cycling", 75), (2, 18, "traditional_strength_training", 50)]
+
+
+def workouts(today: date) -> list[tuple[datetime, str, int]]:
+    """(start, type, minutes) of the demo's workouts over its year, oldest first; none on days
+    without the watch."""
+    out = []
+    for ago in range(WEARABLE_DAYS - 1, -1, -1):
+        day = today - timedelta(days=ago)
+        for weekday, hour, kind, minutes in DEMO_WORKOUTS:
+            if day.weekday() == weekday and ago not in WEARABLE_GAPS:
+                out.append((_at(today, ago, hour), kind, minutes))
+    return out
+
+
+def _load_workouts(conn, uid: str, today: date) -> None:
+    source = get_or_create_channel_source(conn, uid, "garmin")
+    conn.execute(text(
+        """INSERT INTO physical_activities (user_id, activity_date, activity_type,
+               duration_minutes, external_id, source_id)
+           VALUES (:u, :at, :kind, :minutes, :ext, :sid)"""),
+        [{"u": uid, "at": at, "kind": kind, "minutes": minutes, "sid": source,
+          "ext": f"demo:{kind}:{at.isoformat()}"} for at, kind, minutes in workouts(today)])
 
 
 def _rows(markers: dict) -> list[dict]:
@@ -332,6 +367,7 @@ def load_demo(conn, *, today: date | None = None) -> str:
         at = datetime.combine(today - timedelta(days=d), datetime.min.time()) + timedelta(hours=8)
         ingest_observation(conn, uid, "Weight", 68.4 - d * 0.05, "kg", effective_at=at)
     _load_wearables(conn, uid, today)
+    _load_workouts(conn, uid, today)
 
     for days_ago, hour, meal_type, desc, wellbeing, nutrients in MEALS:
         at = datetime.combine(today - timedelta(days=days_ago), datetime.min.time())

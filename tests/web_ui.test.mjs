@@ -407,6 +407,163 @@ test("counts read as one or many", () => {
 
 // ---- small charts don't exaggerate; events and links -----------------------------------------
 
+// ---- where a value comes from (the drawer) and the range bar (#64) ----------------------------
+import { BAND_FROM, BAND_TO, rangeBar, rangePosition, trackDomain } from "../web/static/pages/range-model.js";
+import {
+  canonicalRangeText, conversionText, defaultRangeText, documentText, panelText, rangeStatusText, rangeText,
+  reviewLines, valueCellView,
+} from "../web/static/pages/observation-model.js";
+
+test("the range bar: below, inside, above, with the range in the middle of the track", () => {
+  const range = { ref_min: 3.9, ref_max: 5.6, unit: "mmol/L" };
+  const inside = rangeBar({ ...range, value: 5 });
+  assert.equal(inside.kind, "bar");
+  assert.equal(inside.position, "inside");
+  assert.deepEqual([inside.band.from, inside.band.to], [BAND_FROM, BAND_TO]);
+  assert.ok(inside.at > inside.band.from && inside.at < inside.band.to);
+  assert.equal(inside.clamped, null);
+  assert.equal(inside.label, "5 mmol/L: inside the range 3.9–5.6 mmol/L");
+  assert.equal(rangeBar({ ...range, value: 3.1 }).position, "below");
+  assert.equal(rangeBar({ ...range, value: 6.2 }).position, "above");
+  assert.equal(rangeBar({ ...range, value: 6.2 }).clamped, null);
+  // on a limit is inside, as core.normalize.compute_status says
+  assert.equal(rangeBar({ ...range, value: 5.6 }).position, "inside");
+  assert.equal(rangeBar({ ...range, value: 3.9 }).position, "inside");
+});
+
+test("the range bar: a value far outside is clamped to the edge and says so", () => {
+  const far = rangeBar({ value: 60, unit: "mmol/L", ref_min: 3.9, ref_max: 5.6 });
+  assert.equal(far.position, "above");
+  assert.equal(far.at, 100);
+  assert.equal(far.clamped, "high");
+  assert.match(far.label, /above the range.*far above/);
+  const low = rangeBar({ value: -40, ref_min: 3.9, ref_max: 5.6 });
+  assert.deepEqual([low.at, low.clamped, low.position], [0, "low", "below"]);
+});
+
+test("the range bar: a missing min or max is an open side of the band", () => {
+  const onlyMax = rangeBar({ value: 3.8, unit: "mmol/L", ref_min: null, ref_max: 3.0 });
+  assert.equal(onlyMax.position, "above");
+  assert.deepEqual([onlyMax.band.from, onlyMax.band.to, onlyMax.band.openLow, onlyMax.band.openHigh],
+    [0, BAND_TO, true, false]);
+  assert.equal(onlyMax.label, "3.8 mmol/L: above the range ≤ 3 mmol/L");
+  const onlyMin = rangeBar({ value: 1.2, ref_min: 1.0, ref_max: null });
+  assert.equal(onlyMin.position, "inside");
+  assert.deepEqual([onlyMin.band.from, onlyMin.band.to, onlyMin.band.openHigh], [BAND_FROM, 100, true]);
+  assert.equal(rangeBar({ value: 0.8, ref_min: 1.0, ref_max: null }).position, "below");
+  // a range with no width, and limits at or below zero, still give a track
+  assert.deepEqual(trackDomain(5, 5), [0, 10]);
+  assert.deepEqual(trackDomain(null, -2), [-8, 0]);
+  assert.equal(rangeBar({ value: -1, ref_min: null, ref_max: -2 }).position, "above");
+});
+
+test("the range bar: a limit is above only when the limit itself is past the range", () => {
+  const range = { ref_min: 30, ref_max: 400, unit: "ng/mL" };
+  const above = rangeBar({ ...range, value: 600, comparator: ">" });
+  assert.deepEqual([above.position, above.limit], ["above", ">"]);
+  assert.equal(above.label, ">600 ng/mL is a limit: above the range 30–400 ng/mL (far above: off the bar)");
+  assert.equal(rangeBar({ ...range, value: 450, comparator: ">" }).label, ">450 ng/mL is a limit: above the range 30–400 ng/mL");
+  // ">100": the true value could be inside or above
+  const unsure = rangeBar({ ...range, value: 100, comparator: ">" });
+  assert.equal(unsure.position, "unknown");
+  assert.match(unsure.label, /only a limit: whether it is inside .* can't be told/);
+  assert.equal(rangePosition(400, ">", 30, 400), "above");
+  assert.equal(rangePosition(400, ">=", 30, 400), "unknown");
+  assert.equal(rangePosition(50, ">", 30, null), "inside");
+  // "<0.5" with a range from 0: a concentration can't be below 0, so it is in range
+  assert.equal(rangePosition(0.5, "<", 0, 5), "inside");
+  assert.equal(rangePosition(20, "<", 30, 400), "below");
+  assert.equal(rangePosition(30, "<", 30, 400), "below");
+  assert.equal(rangePosition(30, "<=", 30, 400), "unknown");
+  assert.equal(rangePosition(500, "<", 30, 400), "unknown");
+});
+
+test("the range bar: no range, or a result in words, draws nothing", () => {
+  assert.equal(rangeBar({ value: 5, ref_min: null, ref_max: null }).kind, "none");
+  assert.equal(rangeBar({ value: 5, ref_min: null, ref_max: null }).label, "no range on the form");
+  assert.equal(rangeBar({ value: null, text: "negative", ref_min: 0, ref_max: 1 }).kind, "none");
+  assert.equal(rangeBar({ value: Number.NaN, ref_min: 0, ref_max: 1 }).kind, "none");
+  assert.equal(rangePosition(5, null, null, null), "unknown");
+});
+
+test("the drawer says how a value was converted, and never invents a conversion", () => {
+  const printed = { value: 99, comparator: null, text: null, unit: "mg/dL" };
+  const canonical = { value: 5.4945, unit: "mmol/L", state: "converted", factor: 0.0555, offset: null };
+  assert.equal(conversionText({ printed, canonical }), "5.4945 mmol/L, converted from mg/dL (× 0.0555).");
+  assert.equal(conversionText({ printed, canonical: { ...canonical, factor: null } }),
+    "5.4945 mmol/L, converted from mg/dL");
+  assert.equal(conversionText({ printed: { ...printed, unit: "degF" }, canonical: { ...canonical, unit: "Cel", factor: 0.555556, offset: -17.777778 } }),
+    "5.4945 Cel, converted from degF (× 0.555556 + -17.7778).");
+  assert.equal(conversionText({ printed: { ...printed, unit: "ukat/L" }, canonical: { value: null, unit: "U/L", state: "not_converted" } }),
+    "Not converted: no conversion from “ukat/L” to U/L. Trends and charts leave it out.");
+  assert.equal(conversionText({ printed: { ...printed, unit: null }, canonical: { value: null, unit: null, state: "not_converted" } }),
+    "Not converted: no conversion from “no unit” to —. Trends and charts leave it out.");
+  assert.equal(conversionText({ printed: { ...printed, comparator: ">", value: 600, unit: "ng/mL" }, canonical: { value: 600, unit: "ng/mL", state: "same_unit" } }),
+    ">600 ng/mL: already in the canonical unit, not converted.");
+  assert.equal(conversionText({ printed, canonical: { state: "text" } }), "A result in words: there is no number to convert.");
+});
+
+test("the drawer says where the range came from; a default is only a hint", () => {
+  assert.equal(rangeText({ range: { source: "form", min: 70, max: 100, unit: "mg/dL" } }), "From the form: 70–100 mg/dL");
+  assert.equal(rangeText({ range: { source: "none", min: null, max: null } }), "None on the form.");
+  assert.equal(defaultRangeText({ min: 120, max: 155, unit: "g/L", kind: "population", sex: "female", condition: null, source: "WHO" }),
+    "120–155 g/L · women · WHO");
+  assert.equal(defaultRangeText({ min: null, max: 3, unit: "mmol/L", kind: "target", sex: null, condition: null, source: "ESC 2021" }),
+    "≤ 3 mmol/L · target · ESC 2021");
+  const converted = { state: "converted", unit: "mmol/L" };
+  assert.equal(canonicalRangeText({ range: { canonical: { min: 3.885, max: 5.55, unconverted: false } }, canonical: converted, printed: { unit: "mg/dL" } }),
+    "In the canonical unit: 3.885–5.55 mmol/L");
+  assert.equal(canonicalRangeText({ range: { canonical: null }, canonical: converted, printed: { unit: "mg/dL" } }), "");
+  assert.equal(canonicalRangeText({ range: { canonical: { min: 1, max: 2 } }, canonical: { state: "same_unit" }, printed: {} }), "");
+});
+
+test("the drawer's review lines: a pending value is never dated as reviewed", () => {
+  const review = { status: "pending", channel: "mcp", staged_at: "2026-11-20T10:00:00+00:00", approved_at: null, source_reviewed_at: null, reviewed_by: null };
+  assert.deepEqual(reviewLines({ review, pending: true }), [
+    "Review status: pending", "Came in by: the assistant, from a form", "Recorded on 2026-11-20", "Not reviewed yet."]);
+  // even if a date slipped through, a pending value says it is not reviewed
+  assert.equal(reviewLines({ review: { ...review, approved_at: "2026-11-21", source_reviewed_at: "2026-11-21" }, pending: true }).at(-1), "Not reviewed yet.");
+  // the row's own approval date, not the source's later one
+  assert.equal(reviewLines({ review: { ...review, status: "approved", approved_at: "2026-07-01T09:00:00+00:00", source_reviewed_at: "2026-09-15T09:00:00+00:00", reviewed_by: "human" }, pending: false }).at(-1),
+    "Approved on 2026-07-01 by you");
+  // no history of its own: the source's date, said as the source's
+  assert.equal(reviewLines({ review: { ...review, status: "approved", source_reviewed_at: "2026-09-15T09:00:00+00:00", reviewed_by: "human" }, pending: false }).at(-1),
+    "Approved; its source was last approved on 2026-09-15");
+  assert.equal(reviewLines({ review: { ...review, status: "approved", approved_at: "2026-11-21T09:00:00+00:00", reviewed_by: "human" }, pending: false }).at(-1),
+    "Approved on 2026-11-21 by you");
+  assert.equal(reviewLines({ review: { status: "approved", channel: "manual", staged_at: null, approved_at: null, source_reviewed_at: null }, pending: false }).at(-1),
+    "No separate review recorded: it was stored as approved.");
+  assert.equal(reviewLines({ review: { status: "weird", channel: "fax" }, pending: true })[0], "Review status: weird");
+});
+
+test("a value cell is pending only when the caller says so, never from a row's count", () => {
+  // the Labs index sends the number of queued values in `pending`: the latest value is approved
+  const marker = { id: "o1", name: "Vitamin D 25-OH", value: 22, unit: "ng/mL", pending: 2 };
+  assert.equal(valueCellView(marker).pending, false);
+  assert.equal(valueCellView({ ...marker, pending: true }).pending, false);
+  assert.equal(valueCellView(marker, { pending: true }).pending, true);
+  assert.equal(valueCellView(marker, { pending: 2 }).pending, false);
+  assert.equal(valueCellView(marker).label, "22 ng/mL Vitamin D 25-OH: where it comes from");
+  assert.equal(valueCellView({ value: null, text: null }).text, "—");
+});
+
+test("without a range on the form the drawer says what the status rests on", () => {
+  assert.equal(rangeStatusText({ range: { source: "none" }, status: null }),
+    "Without a range on the form, no status was computed for this value.");
+  // a critical value with no range: its status is the threshold's, never "no status"
+  assert.match(rangeStatusText({ range: { source: "none" }, status: "critical" }), /critical-value threshold/);
+  assert.equal(rangeStatusText({ range: { source: "form" }, status: "high" }), "");
+});
+
+test("the drawer's source lines", () => {
+  assert.equal(documentText(null), "none stored");
+  assert.equal(documentText({ title: "Blood test", date: "2026-10-01", type: "lab_report" }), "Blood test · 2026-10-01 · lab_report");
+  assert.equal(documentText({ title: null, date: null, type: null }), "untitled");
+  assert.equal(panelText({ date: "2026-10-01", type: "Biochemistry", facility: "Lab", rows_in_document: 3 }),
+    "2026-10-01 · Biochemistry · Lab · 3 rows on the form");
+  assert.equal(panelText({ date: "2026-10-01", type: null, facility: null, rows_in_document: null }), "2026-10-01");
+});
+
 test("a small chart's axis spans at least 5% of the values, so a tiny change stays small", () => {
   const [low, high] = chartRange([68.35, 68.4]);
   assert.ok(high - low >= 68.375 * 0.05 - 1e-9);
@@ -1133,6 +1290,131 @@ test("the heatmap is a calendar of the year, coloured from its own lowest to hig
   assert.equal(option.series[0].data.length, 4); // a day without a value is not sent as zero
 });
 
+// ---- sustained deviations on the Vitals page (#75) ------------------------------------------------
+import {
+  findingView, shadedRuns, sustainedEmpty, sustainedFootnote, sustainedNotes, sustainedState, withShading,
+} from "../web/static/pages/sustained-model.js";
+import { SUSTAINED_DICTIONARIES, SUSTAINED_LANGS, sustainedTranslator } from "../web/static/pages/sustained-strings.js";
+
+const SUSTAINED_PARAMS = {
+  baseline_days: 60, min_baseline_days: 30, run_days: 3, spread_k: 2,
+  daily: { resting_hr: { direction: "up", min_delta: 3 }, hrv: { direction: "down", min_delta: 5 } },
+  hr_above_resting: 30, min_minutes: 20,
+};
+const PAIRED = {
+  kind: "days", first_day: "2026-11-03", last_day: "2026-11-06", days: 4, together_days: 3,
+  metrics: [
+    { code: "resting_hr", direction: "up", first_day: "2026-11-03", last_day: "2026-11-06", days: 4, usual: 59, mean_delta: 7.2 },
+    { code: "hrv", direction: "down", first_day: "2026-11-03", last_day: "2026-11-05", days: 3, usual: 46, mean_delta: -12.3 },
+  ],
+  context: [
+    { kind: "workout", day: "2026-11-04", type: "running", minutes: 45 },
+    { kind: "beta_blocker", name: "Bisoprolol", atc_code: "C07AB07" },
+  ],
+};
+const STILL = {
+  kind: "minutes", start: "2026-11-19T15:05:00+02:00", end: "2026-11-19T15:30:00+02:00", day: "2026-11-19",
+  minutes: 25, usual: 58, mean_hr: 95.4, max_hr: 101, context: [],
+};
+
+test("a lasting change is said as how far from your usual, with its context", () => {
+  const view = findingView(PAIRED);
+  assert.equal(view.title, "Resting heart rate and HRV");
+  assert.equal(view.period, "2026-11-03 – 2026-11-06 · 4 days");
+  assert.deepEqual(view.lines, [
+    "Resting heart rate: 7 bpm above your usual 59 bpm on average, 4 days in a row",
+    "HRV: 12 ms below your usual 46 ms on average, 3 days in a row",
+    "Both on 3 of the same days",
+  ]);
+  assert.deepEqual(view.chips, [
+    "Workout on 2026-11-04: running, 45 min",
+    "Bisoprolol: a beta blocker, which lowers heart rate and can hide a rise",
+  ]);
+  const still = findingView(STILL);
+  assert.equal(still.period, "2026-11-19, 15:05–15:30 · 25 min"); // the user's clock, as the API wrote it
+  assert.deepEqual(still.lines, ["On average 95 bpm, 37 above your usual resting 58 bpm, with no steps recorded"]);
+});
+
+test("Ukrainian and Spanish say the days with their own plural forms", () => {
+  assert.match(findingView(PAIRED, "uk").lines[0], /4 дні поспіль$/);
+  assert.match(findingView({ ...PAIRED, metrics: [{ ...PAIRED.metrics[0], days: 5 }] }, "uk").lines[0], /5 днів поспіль$/);
+  assert.match(findingView(PAIRED, "es").lines[1], /3 días seguidos$/);
+  assert.equal(sustainedTranslator("fr").lang, "en");
+});
+
+test("an empty list never says everything is normal, and says when nothing could be checked", () => {
+  const empty = { findings: [], params: SUSTAINED_PARAMS, days_with_values: { resting_hr: 200, hrv: 0 } };
+  assert.equal(sustainedState(empty), "empty");
+  assert.match(sustainedEmpty(empty), /for 3 days in a row\. This only covers what the watch recorded\.$/);
+  const short = { ...empty, days_with_values: { resting_hr: 12, hrv: 12 } };
+  assert.equal(sustainedState(short), "not_enough");
+  assert.match(sustainedEmpty(short), /fewer than 30 days of values in the 60 days before/);
+  assert.equal(sustainedState(null), "none");
+  assert.equal(sustainedState({ ...empty, findings: [STILL] }), "findings");
+});
+
+test("the footnote gives the thresholds as initial defaults and what the rule can't see", () => {
+  const text = sustainedFootnote({ params: SUSTAINED_PARAMS });
+  assert.match(text, /60 days before; 3 days in a row/);
+  assert.match(text, /at least 3 bpm, HRV down by at least 5 ms/);
+  assert.match(text, /initial defaults, to be reviewed/);
+  assert.match(text, /No ECG/);
+  assert.doesNotMatch(text, /\{\w+\}/);
+  for (const lang of SUSTAINED_LANGS) assert.doesNotMatch(sustainedFootnote({ params: SUSTAINED_PARAMS }, lang), /\{\w+\}/);
+});
+
+test("every sustained dictionary has every word and plural form, and none of them alarms or reassures", () => {
+  const plain = Object.keys(SUSTAINED_DICTIONARIES.en).filter((key) => !/_(one|other)$/.test(key));
+  const plurals = [...new Set(Object.keys(SUSTAINED_DICTIONARIES.en).filter((key) => /_other$/.test(key)).map((key) => key.replace(/_other$/, "")))];
+  for (const lang of SUSTAINED_LANGS) {
+    const dict = SUSTAINED_DICTIONARIES[lang];
+    for (const key of plain) assert.ok(dict[key], `${lang}: ${key}`);
+    const forms = new Intl.PluralRules(lang).resolvedOptions().pluralCategories.filter((form) => form !== "many" || lang !== "es");
+    for (const key of plurals) for (const form of forms) assert.ok(dict[`${key}_${form}`], `${lang}: ${key}_${form}`);
+    for (const text of Object.values(dict)) {
+      assert.doesNotMatch(text.toLowerCase(), /everything is normal|all normal|todo normal|все в нормі|nothing to worry|danger|urgent|alarm|тривог|небезпе|peligro|urgente/);
+    }
+  }
+});
+
+test("without recorded workouts the list says step-free exercise may show up in it", () => {
+  const base = { findings: [], params: SUSTAINED_PARAMS };
+  assert.match(sustainedNotes({ ...base, minutes_rule: "checked", workouts_recorded: false })[0], /No workouts are recorded here/);
+  const gym = { kind: "workout", day: "2026-11-04", type: "traditional_strength_training", minutes: 50 };
+  assert.deepEqual(findingView({ ...PAIRED, context: [gym] }).chips, ["Workout on 2026-11-04: traditional strength training, 50 min"]);
+  assert.match(sustainedNotes({ ...base, minutes_rule: "checked", workouts_recorded: false }, "uk")[0], /Тренувань тут не записано/);
+  assert.deepEqual(sustainedNotes({ ...base, minutes_rule: "checked", workouts_recorded: true }), []);
+  assert.deepEqual(sustainedNotes({ ...base, minutes_rule: "no_samples", workouts_recorded: false }), []); // Garmin only: no minutes rule
+  assert.equal(findingView({ ...PAIRED, metrics: [{ ...PAIRED.metrics[1], code: "hrv_sdnn" }], together_days: null }).title, "HRV (SDNN, Apple)");
+});
+
+test("the runs are shaded on their own panels, the last day included", () => {
+  const panels = [
+    { id: "sleep", series: [{ code: "sleep_duration" }] },
+    { id: "hrv", series: [{ code: "hrv" }] },
+    { id: "resting_hr", series: [{ code: "resting_hr" }] },
+  ];
+  const sustained = { findings: [PAIRED, STILL] };
+  assert.deepEqual(shadedRuns(sustained, panels), [
+    { panel: 2, from: Date.parse("2026-11-03"), to: Date.parse("2026-11-07") },
+    { panel: 1, from: Date.parse("2026-11-03"), to: Date.parse("2026-11-06") },
+  ]);
+  assert.deepEqual(shadedRuns(sustained, panels.slice(0, 1)), []); // a panel that isn't drawn
+  const option = { series: [{ name: "own" }] };
+  const shaded = withShading(option, sustained, panels, { colors: { sustained: "a", sustainedEdge: "b", muted: "c" } });
+  assert.equal(shaded.series.length, 3);
+  assert.equal(shaded.series[0].name, "own");
+  assert.deepEqual(shaded.series.slice(1).map((s) => [s.xAxisIndex, s.markArea.data.length, s.markArea.label.show]), [[2, 1, true], [1, 1, true]]);
+  const weekly = withShading(option, sustained, panels, { colors: {}, bucket: "week" });
+  assert.equal(weekly.series[1].markArea.label.show, false);
+  assert.equal(withShading(option, { findings: [] }, panels, { colors: {} }), option);
+  const windowed = { xAxis: [{ min: Date.parse("2026-11-05") }], series: [] };
+  const clipped = withShading(windowed, sustained, panels, { colors: {} });
+  assert.deepEqual(clipped.series.map((s) => s.markArea.data[0][0].xAxis), [Date.parse("2026-11-05"), Date.parse("2026-11-05")]);
+  const later = { xAxis: [{ min: Date.parse("2026-11-06") }], series: [] };
+  assert.equal(withShading(later, sustained, panels, { colors: {} }).series.length, 1); // HRV ended before it
+});
+
 test("the vitals page loads", () => {
   assert.ok(PAGES.find((page) => page.id === "vitals").load);
   assert.deepEqual(parseRoute("#/vitals/365").args, ["365"]);
@@ -1233,4 +1515,105 @@ test("the charts: gaps stay empty, the norm and sodium's limit are dashed lines"
   assert.deepEqual(salt.series.map((s) => s.data), [[null, 2900], [null, 1500]]);
   assert.equal(salt.series[0].markLine.data[0].yAxis, 2300);
   assert.equal(salt.series[1].markLine, undefined);
+});
+
+// the emergency packet (#74) and the privacy blur (#63)
+import { NFC_TAGS, cardSides, copyText, ndefSize, nfcBudget, packetLang, tallerThanCard, utf8Size } from "../web/static/pages/emergency-model.js";
+import { hideTitles, isBlurShortcut, restoreTitles } from "../web/static/privacy.js";
+
+test("emergency: the NFC size is the NDEF text record with its wrapping, in UTF-8 bytes", () => {
+  // the same figures as core/emergency.py (tests/test_emergency.py)
+  assert.deepEqual(NFC_TAGS.map((tag) => tag.capacity), [144, 504, 888]);
+  assert.equal(ndefSize("", "en"), 10);
+  assert.equal(ndefSize("abc", "en"), 13);
+  assert.equal(ndefSize("абв", "uk"), 16);
+  assert.equal(utf8Size("ñ"), 2);
+  assert.equal(ndefSize("a".repeat(252), "en"), 1 + 3 + 3 + 1 + 255 + 1);
+  assert.equal(ndefSize("a".repeat(253), "en"), 3 + 5 + 3 + 253 + 3 + 1);
+});
+
+test("emergency: over budget is reported with the overflow, the text is never shortened", () => {
+  const edge = "a".repeat(134);
+  assert.deepEqual(nfcBudget(edge).tags.map((tag) => tag.fits), [true, true, true]);
+  const long = "Ліки: ".repeat(60);
+  const budget = nfcBudget(long, "uk");
+  assert.equal(budget.chars, [...long].length);
+  assert.equal(budget.textBytes, utf8Size(long));
+  const ntag215 = budget.tags.find((tag) => tag.tag === "NTAG215");
+  assert.equal(ntag215.fits, false);
+  assert.equal(ntag215.over, budget.size - 504);
+  assert.equal(budget.tags.find((tag) => tag.tag === "NTAG213").over, budget.size - 144);
+});
+
+test("emergency: copying falls back when the Clipboard API is missing or refuses", async () => {
+  const copied = [];
+  assert.equal(await copyText("x", { writeText: async (s) => { copied.push(s); } }, () => false), "copied");
+  assert.deepEqual(copied, ["x"]);
+  assert.equal(await copyText("y", undefined, (s) => s === "y"), "copied");
+  assert.equal(await copyText("z", { writeText: async () => { throw new Error("denied"); } }, () => true), "copied");
+  assert.equal(await copyText("z", null, () => false), "failed");
+  assert.equal(await copyText("z", null, () => { throw new Error("no execCommand"); }), "failed");
+});
+
+test("emergency: every lock-screen field lands on one side of the wallet card", () => {
+  const keys = ["conditions", "medications", "allergies", "blood_type", "emergency_contact", "notes", "new_field"];
+  const sides = cardSides(keys.map((key) => ({ key })));
+  assert.deepEqual(sides.front.map((f) => f.key), ["allergies", "blood_type", "emergency_contact"]);
+  assert.deepEqual(sides.back.map((f) => f.key), ["conditions", "medications", "notes", "new_field"]);
+  assert.equal(packetLang("es"), "es");
+  assert.equal(packetLang("de"), "en");
+});
+
+test("emergency: the page comes after the visit report", () => {
+  const ids = PAGES.map((page) => page.id);
+  assert.equal(ids.indexOf("emergency"), ids.indexOf("report") + 1);
+});
+
+test("privacy blur: Alt+Shift+B toggles, but not while typing", () => {
+  const key = (target, extra = {}) => ({ altKey: true, shiftKey: true, ctrlKey: false, metaKey: false, code: "KeyB", target, ...extra });
+  assert.equal(isBlurShortcut(key({ tagName: "BODY" })), true);
+  assert.equal(isBlurShortcut(key({ tagName: "TEXTAREA" })), false);
+  assert.equal(isBlurShortcut(key({ tagName: "DIV", isContentEditable: true })), false);
+  assert.equal(isBlurShortcut(key({ tagName: "BODY" }, { ctrlKey: true })), false);
+  assert.equal(isBlurShortcut(key({ tagName: "BODY" }, { code: "KeyN" })), false);
+});
+
+test("emergency: a card side taller than the 54 mm probe is reported, the same height is not", () => {
+  assert.equal(tallerThanCard([204.1, 204.1], 204.1), false);
+  assert.equal(tallerThanCard([204.1, 313], 204.1), true);
+  assert.equal(tallerThanCard([204.5], 204.1), false); // rounding, not overflow
+});
+
+test("privacy blur: tooltips are put aside while blurred and given back after", () => {
+  // a minimal stand-in for the DOM: elements with attributes, and SVG <title> elements with text
+  class Node {
+    constructor(localName, attrs = {}, text = "") {
+      this.localName = localName;
+      this.attrs = new Map(Object.entries(attrs));
+      this.textContent = text;
+    }
+    getAttribute(name) { return this.attrs.get(name) ?? null; }
+    setAttribute(name, value) { this.attrs.set(name, String(value)); }
+    removeAttribute(name) { this.attrs.delete(name); }
+  }
+  const year = new Node("button", { title: "1985: born, 3 records" });
+  const mark = new Node("title", {}, "Hypothyroidism · 2022-03-01");
+  const empty = new Node("title", {}, "");
+  const nodes = [year, mark, empty];
+  const root = {
+    querySelectorAll(selector) {
+      const attr = selector.match(/^\[([\w-]+)\]$/);
+      if (attr) return nodes.filter((n) => n.attrs.has(attr[1]));
+      return nodes.filter((n) => n.localName === selector);
+    },
+  };
+  hideTitles(root);
+  assert.equal(year.getAttribute("title"), null);
+  assert.equal(mark.textContent, "");
+  assert.equal(empty.getAttribute("data-privacy-title"), null);
+  hideTitles(root); // again (a redraw): nothing lost
+  restoreTitles(root);
+  assert.equal(year.getAttribute("title"), "1985: born, 3 records");
+  assert.equal(mark.textContent, "Hypothyroidism · 2022-03-01");
+  assert.equal(year.getAttribute("data-privacy-title"), null);
 });
