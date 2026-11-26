@@ -2866,9 +2866,9 @@ details > summary:hover {
 
 /* Blurred by default: every text-bearing element of a page, so a new page is covered without
    being listed here. */
-body.privacy-blur main .view :is(
+body.privacy-blur :is(main .view, .obs-body) :is(
   p, li, td, th, dd, pre, textarea, input, time, figcaption, caption, output, h2, h3, h4, svg, canvas,
-  .chart, .matrix, .hb-grid, .vitals-heatmap, .vitals-readout, .tl-years, .private
+  .chart, .matrix, .hb-grid, .vitals-heatmap, .vitals-readout, .tl-years, .range-bar, .private
 ) {
   filter: blur(0.35rem);
 }
@@ -2876,7 +2876,7 @@ body.privacy-blur main .view :is(
 /* Opted out: the page's own words, not the record's. A section's heading, column headings, controls,
    the explanatory notes a page marks as such, and anything marked `public`. The critical-values
    alert stays readable: its heading, message and disclaimer — only its value line is blurred. */
-body.privacy-blur main .view :is(
+body.privacy-blur :is(main .view, .obs-body) :is(
   section > h2, section > h3, .view > h2, thead th, label, button, select, summary, legend,
   .footnote, .state *, .tile-key, .public, .public *,
   li.critical-row, .critical-row p:not(.critical-value), .critical-disclaimer, .critical h2,
@@ -2888,18 +2888,18 @@ body.privacy-blur main .view :is(
 }
 
 /* the record's names in a card heading are data, even directly under a section */
-body.privacy-blur main .view :is(.rec-cards h3, .tl-detail h2, .tl-detail-kind, .emergency-field-text) {
+body.privacy-blur :is(main .view, .obs-body) :is(.rec-cards h3, .tl-detail h2, .tl-detail-kind, .emergency-field-text) {
   filter: blur(0.35rem);
 }
 
 /* blurred text must not be read back through a selection either; tooltips: privacy.js */
-body.privacy-blur main .view :is(p, li, td, pre, textarea, .chart, svg) {
+body.privacy-blur :is(main .view, .obs-body) :is(p, li, td, pre, textarea, .chart, svg) {
   user-select: none;
 }
 
 /* paper is not a screenshot: a printed report or wallet card is never blurred */
 @media print {
-  body.privacy-blur main * {
+  body.privacy-blur :is(main, .obs-drawer) * {
     filter: none !important;
   }
 }
