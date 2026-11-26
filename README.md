@@ -169,6 +169,8 @@ Integration tests never touch the working database: `tests/conftest.py` drops an
 `TEST_DATABASE_URL` (the name must end in `_test`). Without Postgres, integration tests are
 skipped locally; CI sets `REQUIRE_DB=1` so they fail instead.
 
+Why this exists and where it is going: [MANIFESTO.md](MANIFESTO.md).
+
 Development history: [PROGRESS.md](PROGRESS.md).
 
 How the guardrails work: [How to let an LLM read your medical records without trusting it](https://zhukovskyi.space/blog/health-os-guardrails/). Made by [Andrii Zhukovskyi](https://zhukovskyi.space/).
