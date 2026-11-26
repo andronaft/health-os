@@ -5,6 +5,7 @@ import json
 from datetime import date, timedelta
 
 import pytest
+from sqlalchemy import text
 from starlette.testclient import TestClient
 
 import web.app
@@ -79,6 +80,12 @@ def test_unverified_allergies_are_included_and_marked(conn, patient):
     assert "latex (не підтверджено)" in uk["allergies"]
     es = {f["key"]: f["text"] for f in build(conn, "es")["lock_screen"]["fields"]}
     assert "penicillin (anaphylaxis, grave)" in es["allergies"]
+
+
+def test_a_diagnosis_without_clinical_status_counts_as_current(conn, patient):
+    did = add_diagnosis(conn, patient, "Migraine", diagnosed_at=TODAY - timedelta(days=10))
+    conn.execute(text("UPDATE diagnoses SET clinical_status=NULL WHERE id=:d"), {"d": did})
+    assert "Migraine" in [d["name"] for d in build(conn, "en")["conditions"]]
 
 
 def test_lock_screen_has_one_block_per_medical_id_field(conn, patient):

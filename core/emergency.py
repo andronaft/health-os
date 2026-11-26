@@ -8,7 +8,7 @@ or to a tag:
 
 Approved data only, and no model: allergies (v_allergies — unverified ones too, marked, the same
 fail-safe as everywhere else), current medications (v_medications_current — a stopped one is not
-there), active diagnoses (v_diagnoses, clinical status active / recurrence / relapse; a refuted one
+there), active diagnoses (v_diagnoses, clinical status active / recurrence / relapse or none; a refuted one
 is no diagnosis, a resolved, inactive or in-remission one is not current; a suspected, provisional
 or differential one is listed and says so), blood type and emergency contact from the profile.
 Observations never appear: nothing pending can.
@@ -245,7 +245,9 @@ def _read(conn, uid: str) -> dict:
     diags = conn.execute(
         text("""SELECT diagnosis_name, icd10_code, clinical_status, verification_status
                 FROM v_diagnoses
-                WHERE user_id=:u AND clinical_status = ANY(:active)
+                WHERE user_id=:u
+                  -- no clinical status counts as current, never as past (as on the report)
+                  AND (clinical_status IS NULL OR clinical_status = ANY(:active))
                   AND verification_status IS DISTINCT FROM 'refuted'
                 ORDER BY (verification_status IS DISTINCT FROM 'confirmed'), diagnosed_at DESC,
                          diagnosis_name, id"""),
