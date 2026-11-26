@@ -1133,108 +1133,6 @@ test("the heatmap is a calendar of the year, coloured from its own lowest to hig
   assert.equal(option.series[0].data.length, 4); // a day without a value is not sent as zero
 });
 
-test("the vitals page loads", () => {
-  assert.ok(PAGES.find((page) => page.id === "vitals").load);
-  assert.deepEqual(parseRoute("#/vitals/365").args, ["365"]);
-});
-
-// ---- Food -------------------------------------------------------------------------------------
-
-const nutrient = (code, extra = {}) => ({
-  code, name: code, unit: "g", rda: null, upper_limit: null, limit_only: false, logged: true,
-  avg_per_day: 1, pct_rda: null, flag: null, ...extra,
-});
-
-test("the food window comes from the route, and anything unknown is 30 days", () => {
-  assert.equal(routeDays(["90"], [7, 30, 90]), 90);
-  assert.equal(routeDays(["365"], [7, 30, 90]), 30);
-  assert.equal(routeDays([], [7, 30, 90]), 30);
-  assert.equal(routeDays(["abc"], [7, 30, 90]), 30);
-});
-
-test("the window's dates end today, oldest first, across a month's end", () => {
-  assert.deepEqual(windowDates(3, new Date(2026, 10, 1)), ["2026-10-30", "2026-10-31", "2026-11-01"]);
-});
-
-test("a day without a meal is a gap; a logged day without the nutrient is none of it", () => {
-  const daily = [{ date: "2026-11-01", meals: 2, totals: { energy_kcal: 1800 } }];
-  assert.deepEqual(dailyValues(daily, ["2026-10-31", "2026-11-01"], "energy_kcal"), [null, 1800]);
-  assert.deepEqual(dailyValues(daily, ["2026-11-01"], "sodium"), [0]);
-});
-
-test("amounts: whole numbers from 10 up, one decimal below", () => {
-  assert.equal(amount(2361.94), "2362");
-  assert.equal(amount(4.25), "4.3");
-  assert.equal(amount(0.8), "0.8");
-  assert.equal(amount(null), "");
-  assert.equal(amountText(1580.2, "mg"), "1580 mg");
-});
-
-test("a ceiling-only nutrient reads as a limit, the others as a norm with its maximum", () => {
-  assert.equal(normText(nutrient("sodium", { rda: 2300, upper_limit: 2300, limit_only: true, unit: "mg" })), "limit 2300 mg");
-  assert.equal(normText(nutrient("calcium", { rda: 1000, upper_limit: 2500, unit: "mg" })), "1000 mg · max 2500");
-  assert.equal(normText(nutrient("protein", { rda: 56 })), "56 g");
-  assert.equal(normText(nutrient("caffeine", { upper_limit: 400, unit: "mg" })), "limit 400 mg");
-  assert.equal(normText(nutrient("mono_fat")), "");
-  assert.equal(pctText(nutrient("sugar", { pct_rda: 153, limit_only: true })), "153% of the limit");
-  assert.equal(pctText(nutrient("fiber", { pct_rda: 67 })), "67% of the norm");
-  assert.equal(pctText(nutrient("x")), "");
-});
-
-test("flags: below 70% reads as low, over the limit as high, nothing else gets a pill", () => {
-  assert.equal(flagStatus("deficient"), "low");
-  assert.equal(flagStatus("excess"), "high");
-  assert.equal(flagStatus(null), null);
-  const rows = [
-    nutrient("a", { flag: "deficient", pct_rda: 60 }), nutrient("b", { flag: "deficient", pct_rda: 4 }),
-    nutrient("c", { flag: "excess", avg_per_day: 76, upper_limit: 50 }),
-    nutrient("d", { flag: "excess", avg_per_day: 36, upper_limit: 20 }), nutrient("e"),
-  ];
-  assert.deepEqual(flagged(rows, "deficient").map((n) => n.code), ["b", "a"]);
-  assert.deepEqual(flagged(rows, "excess").map((n) => n.code), ["d", "c"]);
-});
-
-test("a meal's note: an odd time first, then what was entered after it", () => {
-  const meal = { at: "2026-11-03T02:47", date: "2026-11-03", time_check: "night", symptoms: "bloating", wellbeing: null };
-  assert.equal(timeOf(meal), "02:47");
-  assert.match(mealNote(meal), /^Before 04:00, so it counts toward 2026-11-03\. .* · after: bloating$/);
-  assert.equal(mealNote({ ...meal, time_check: null, symptoms: null }), "");
-  assert.equal(mealTypeWord("snack"), "Snack");
-  assert.equal(mealTypeWord("brunch"), "brunch");
-});
-
-test("coverage counts logged days and meals, and estimates say they are estimates", () => {
-  assert.equal(coverageText({ days_logged: 18, meals_total: 111, window: { days: 30 } }),
-    "Meals logged on 18 of the last 30 days · 111 meals");
-  assert.equal(coverageText({ days_logged: 1, meals_total: 1, window: { days: 7 } }),
-    "Meals logged on 1 of the last 7 days · 1 meal");
-  assert.match(sourceText([{ nutrient_source: "model_estimate" }]), /estimates/);
-  assert.equal(sourceText([{ nutrient_source: "model_estimate" }, { nutrient_source: "label" }]),
-    "1 of 2 meals have estimated amounts, not measurements.");
-  assert.equal(sourceText([{ nutrient_source: "label" }]), "");
-});
-
-test("the charts: gaps stay empty, the norm and sodium's limit are dashed lines", () => {
-  const data = {
-    window: { days: 2 },
-    nutrients: [
-      nutrient("energy_kcal", { rda: 2500, unit: "kcal" }),
-      nutrient("sodium", { rda: 2300, upper_limit: 2300, limit_only: true, unit: "mg" }),
-      nutrient("potassium", { rda: 3400, unit: "mg" }),
-    ],
-    daily: [{ date: "2026-11-02", meals: 3, totals: { energy_kcal: 2100, sodium: 2900, potassium: 1500 } }],
-  };
-  const dates = ["2026-11-01", "2026-11-02"];
-  const energy = energyOption(data, dates, { colors: {} });
-  assert.deepEqual(energy.series[0].data, [null, 2100]);
-  assert.equal(energy.series[0].markLine.data[0].yAxis, 2500);
-  assert.equal(energy.tooltip.valueFormatter(undefined), "not logged");
-  const salt = sodiumOption(data, dates, { colors: {} });
-  assert.deepEqual(salt.series.map((s) => s.data), [[null, 2900], [null, 1500]]);
-  assert.equal(salt.series[0].markLine.data[0].yAxis, 2300);
-  assert.equal(salt.series[1].markLine, undefined);
-});
-
 // ---- sustained deviations on the Vitals page (#75) ------------------------------------------------
 import { findingView, shadedRuns, sustainedEmpty, sustainedFootnote, sustainedState, withShading } from "../web/static/pages/sustained-model.js";
 import { SUSTAINED_DICTIONARIES, SUSTAINED_LANGS, sustainedTranslator } from "../web/static/pages/sustained-strings.js";
@@ -1340,4 +1238,106 @@ test("the runs are shaded on their own panels, the last day included", () => {
   const weekly = withShading(option, sustained, panels, { colors: {}, bucket: "week" });
   assert.equal(weekly.series[1].markArea.label.show, false);
   assert.equal(withShading(option, { findings: [] }, panels, { colors: {} }), option);
+});
+
+test("the vitals page loads", () => {
+  assert.ok(PAGES.find((page) => page.id === "vitals").load);
+  assert.deepEqual(parseRoute("#/vitals/365").args, ["365"]);
+});
+
+// ---- Food -------------------------------------------------------------------------------------
+
+const nutrient = (code, extra = {}) => ({
+  code, name: code, unit: "g", rda: null, upper_limit: null, limit_only: false, logged: true,
+  avg_per_day: 1, pct_rda: null, flag: null, ...extra,
+});
+
+test("the food window comes from the route, and anything unknown is 30 days", () => {
+  assert.equal(routeDays(["90"], [7, 30, 90]), 90);
+  assert.equal(routeDays(["365"], [7, 30, 90]), 30);
+  assert.equal(routeDays([], [7, 30, 90]), 30);
+  assert.equal(routeDays(["abc"], [7, 30, 90]), 30);
+});
+
+test("the window's dates end today, oldest first, across a month's end", () => {
+  assert.deepEqual(windowDates(3, new Date(2026, 10, 1)), ["2026-10-30", "2026-10-31", "2026-11-01"]);
+});
+
+test("a day without a meal is a gap; a logged day without the nutrient is none of it", () => {
+  const daily = [{ date: "2026-11-01", meals: 2, totals: { energy_kcal: 1800 } }];
+  assert.deepEqual(dailyValues(daily, ["2026-10-31", "2026-11-01"], "energy_kcal"), [null, 1800]);
+  assert.deepEqual(dailyValues(daily, ["2026-11-01"], "sodium"), [0]);
+});
+
+test("amounts: whole numbers from 10 up, one decimal below", () => {
+  assert.equal(amount(2361.94), "2362");
+  assert.equal(amount(4.25), "4.3");
+  assert.equal(amount(0.8), "0.8");
+  assert.equal(amount(null), "");
+  assert.equal(amountText(1580.2, "mg"), "1580 mg");
+});
+
+test("a ceiling-only nutrient reads as a limit, the others as a norm with its maximum", () => {
+  assert.equal(normText(nutrient("sodium", { rda: 2300, upper_limit: 2300, limit_only: true, unit: "mg" })), "limit 2300 mg");
+  assert.equal(normText(nutrient("calcium", { rda: 1000, upper_limit: 2500, unit: "mg" })), "1000 mg · max 2500");
+  assert.equal(normText(nutrient("protein", { rda: 56 })), "56 g");
+  assert.equal(normText(nutrient("caffeine", { upper_limit: 400, unit: "mg" })), "limit 400 mg");
+  assert.equal(normText(nutrient("mono_fat")), "");
+  assert.equal(pctText(nutrient("sugar", { pct_rda: 153, limit_only: true })), "153% of the limit");
+  assert.equal(pctText(nutrient("fiber", { pct_rda: 67 })), "67% of the norm");
+  assert.equal(pctText(nutrient("x")), "");
+});
+
+test("flags: below 70% reads as low, over the limit as high, nothing else gets a pill", () => {
+  assert.equal(flagStatus("deficient"), "low");
+  assert.equal(flagStatus("excess"), "high");
+  assert.equal(flagStatus(null), null);
+  const rows = [
+    nutrient("a", { flag: "deficient", pct_rda: 60 }), nutrient("b", { flag: "deficient", pct_rda: 4 }),
+    nutrient("c", { flag: "excess", avg_per_day: 76, upper_limit: 50 }),
+    nutrient("d", { flag: "excess", avg_per_day: 36, upper_limit: 20 }), nutrient("e"),
+  ];
+  assert.deepEqual(flagged(rows, "deficient").map((n) => n.code), ["b", "a"]);
+  assert.deepEqual(flagged(rows, "excess").map((n) => n.code), ["d", "c"]);
+});
+
+test("a meal's note: an odd time first, then what was entered after it", () => {
+  const meal = { at: "2026-11-03T02:47", date: "2026-11-03", time_check: "night", symptoms: "bloating", wellbeing: null };
+  assert.equal(timeOf(meal), "02:47");
+  assert.match(mealNote(meal), /^Before 04:00, so it counts toward 2026-11-03\. .* · after: bloating$/);
+  assert.equal(mealNote({ ...meal, time_check: null, symptoms: null }), "");
+  assert.equal(mealTypeWord("snack"), "Snack");
+  assert.equal(mealTypeWord("brunch"), "brunch");
+});
+
+test("coverage counts logged days and meals, and estimates say they are estimates", () => {
+  assert.equal(coverageText({ days_logged: 18, meals_total: 111, window: { days: 30 } }),
+    "Meals logged on 18 of the last 30 days · 111 meals");
+  assert.equal(coverageText({ days_logged: 1, meals_total: 1, window: { days: 7 } }),
+    "Meals logged on 1 of the last 7 days · 1 meal");
+  assert.match(sourceText([{ nutrient_source: "model_estimate" }]), /estimates/);
+  assert.equal(sourceText([{ nutrient_source: "model_estimate" }, { nutrient_source: "label" }]),
+    "1 of 2 meals have estimated amounts, not measurements.");
+  assert.equal(sourceText([{ nutrient_source: "label" }]), "");
+});
+
+test("the charts: gaps stay empty, the norm and sodium's limit are dashed lines", () => {
+  const data = {
+    window: { days: 2 },
+    nutrients: [
+      nutrient("energy_kcal", { rda: 2500, unit: "kcal" }),
+      nutrient("sodium", { rda: 2300, upper_limit: 2300, limit_only: true, unit: "mg" }),
+      nutrient("potassium", { rda: 3400, unit: "mg" }),
+    ],
+    daily: [{ date: "2026-11-02", meals: 3, totals: { energy_kcal: 2100, sodium: 2900, potassium: 1500 } }],
+  };
+  const dates = ["2026-11-01", "2026-11-02"];
+  const energy = energyOption(data, dates, { colors: {} });
+  assert.deepEqual(energy.series[0].data, [null, 2100]);
+  assert.equal(energy.series[0].markLine.data[0].yAxis, 2500);
+  assert.equal(energy.tooltip.valueFormatter(undefined), "not logged");
+  const salt = sodiumOption(data, dates, { colors: {} });
+  assert.deepEqual(salt.series.map((s) => s.data), [[null, 2900], [null, 1500]]);
+  assert.equal(salt.series[0].markLine.data[0].yAxis, 2300);
+  assert.equal(salt.series[1].markLine, undefined);
 });

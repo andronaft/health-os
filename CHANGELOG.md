@@ -7,16 +7,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 ## [Unreleased]
 
 ### Added
-- Sustained deviations from the personal baseline (#75): resting heart rate up or HRV down for
-  3+ days in a row against the median and spread of the 60 days before (both reported together
-  when they share days; a missing day ends a run), and heart rate 30+ bpm above the resting
-  median for 20+ still minutes with no steps and no workout (Apple Health raw samples). A
-  workout on those days or a current beta blocker (ATC C07) is listed as context, never used to
-  change the rule. The thresholds are initial defaults, to be reviewed, in one place
-  (`analytics/baselines.py`). Shown as a `sustained` section of `get_anomalies` (no new tool) and
-  of the weekly report (which is then not "stable"), and on the Vitals page as a short "Worth
-  checking" list (English, Ukrainian, Spanish) with the days shaded on the watch's charts, in the
-  browser's time zone. No push alerts. The demo watch has one such episode, 20–23 days ago.
 - Browser UI: the medical-record pages (#57). **Timeline**: the whole record on one axis, in
   lanes (diagnoses; visits, procedures and hospital stays; lab panels; vaccinations; documents),
   with medications and habits drawn as bars from start to stop (to today while ongoing). A
@@ -48,6 +38,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   Every printed page ends with how many approved values the report was made from, that it is not
   a medical document and that pending values are not included. New endpoint
   `GET /api/v1/report?lang=…&since=YYYY-MM-DD`.
+- Sustained deviations from the personal baseline (#75): resting heart rate up or HRV down for
+  3+ days in a row against the median and spread of the 60 days before (both reported together
+  when they share days; a missing day ends a run), and heart rate 30+ bpm above the resting
+  median for 20+ still minutes with no steps and no workout (Apple Health raw samples). A
+  workout on those days or a current beta blocker (ATC C07) is listed as context, never used to
+  change the rule. The thresholds are initial defaults, to be reviewed, in one place
+  (`analytics/baselines.py`). Shown as a `sustained` section of `get_anomalies` (no new tool) and
+  of the weekly report (which is then not "stable"), and on the Vitals page as a short "Worth
+  checking" list (English, Ukrainian, Spanish) with the days shaded on the watch's charts, in the
+  browser's time zone. No push alerts. The demo watch has one such episode, 20–23 days ago.
 
 ### Added
 - Browser UI: the Vitals page (#56). Home blood pressure is checked against the ESH home
