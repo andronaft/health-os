@@ -61,6 +61,10 @@ function buildNav() {
       el("ul", { "aria-labelledby": titleId }, ...items));
   });
   document.getElementById("nav").append(el("ul", {}, ...groups));
+  // a tap on any link folds the phone menu, the current page's too (its hash doesn't change)
+  document.getElementById("nav").addEventListener("click", (e) => {
+    if (e.target.closest("a")) setMenuOpen(false);
+  });
   document.querySelector(".brand").after(menuToggle);
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && sidebar.hasAttribute("data-open")) {

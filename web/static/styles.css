@@ -49,7 +49,9 @@
   --on-accent: light-dark(#ffffff, #0c1a1b);
   --focus: light-dark(#0b6b73, #7fdde3);
   --ok: light-dark(#1a7f37, #4ac26b);
-  --error: light-dark(#b42318, #ff7b72);
+  /* a load or connection problem: slate, not red. Red is kept for critical values alone; the icon
+     and the words say it is an error */
+  --error: light-dark(#454c58, #c3c8d0);
 
   /* value status; every pill also has its word and icon */
   --low: light-dark(#1f5fbf, #7db2ff);
@@ -398,6 +400,11 @@ footer strong {
 }
 
 @media (max-width: 47.99rem) {
+  /* the sticky header must not hide what keyboard focus or a #link scrolls to (WCAG 2.4.11) */
+  html {
+    scroll-padding-top: calc(var(--header-height) + var(--space-3));
+  }
+
   .frame {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto 1fr;
@@ -659,13 +666,13 @@ tr[data-pending] td:first-child {
 }
 
 .state-error {
-  border: 1px solid var(--error);
-  border-inline-start-width: 4px;
-  background: color-mix(in srgb, var(--error) 6%, var(--surface));
+  border: 1px solid var(--control-border);
+  border-inline-start: 4px solid var(--error);
+  background: var(--surface);
 }
 
 .state-error .state-title {
-  color: var(--error);
+  color: var(--fg);
 }
 
 .state-icon {
@@ -681,6 +688,12 @@ tr[data-pending] td:first-child {
   font-weight: 700;
   line-height: 1;
   vertical-align: -0.1em;
+}
+
+/* the critical box's own "!" stays red */
+.critical .state-icon {
+  background: var(--critical);
+  color: var(--on-critical);
 }
 
 .state button {
@@ -814,7 +827,8 @@ th[aria-sort] {
   font-size: 0.75em;
 }
 
-/* a long table scrolls inside its frame on a wide window, so the header stays in view */
+/* a long table scrolls inside its own frame on a wide window, so its sticky header stays in view
+   (on a phone the frame only scrolls sideways; a box inside a box would trap the thumb) */
 @media (min-width: 48rem) {
   .table-scroll {
     max-height: min(75vh, 48rem);
