@@ -31,6 +31,7 @@ from starlette.staticfiles import StaticFiles
 from core.db import engine
 from web.food import food_page
 from web.labs import lab_index, lab_marker
+from web.observation import observation as read_observation
 from web.overview import overview as read_overview
 from web.record import diagnoses as read_diagnoses
 from web.record import habits as read_habits
@@ -226,6 +227,12 @@ def food(request):
                                                       request.query_params.get("days")))
 
 
+# where a value comes from: the drawer (#64 and round 2)
+def observation(request):
+    return _read(request, lambda conn, lang: read_observation(
+        conn, request.path_params["id"], lang))
+
+
 def create_app(token: str) -> Starlette:
     if not token:
         raise ValueError("a session token is required")
@@ -244,6 +251,8 @@ def create_app(token: str) -> Starlette:
         Route("/api/v1/diagnoses", diagnoses, methods=["GET"]),
         Route("/api/v1/habits", habits, methods=["GET"]),
         Route("/api/v1/report", report, methods=["GET"]),
+        # where a value comes from: the drawer
+        Route("/api/v1/observations/{id}", observation, methods=["GET"]),
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]
     return Starlette(routes=routes, middleware=[
