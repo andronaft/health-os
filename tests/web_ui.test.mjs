@@ -1234,3 +1234,64 @@ test("the charts: gaps stay empty, the norm and sodium's limit are dashed lines"
   assert.equal(salt.series[0].markLine.data[0].yAxis, 2300);
   assert.equal(salt.series[1].markLine, undefined);
 });
+
+// the emergency packet (#74) and the privacy blur (#63)
+import { NFC_TAGS, cardSides, copyText, ndefSize, nfcBudget, packetLang, utf8Size } from "../web/static/pages/emergency-model.js";
+import { isBlurShortcut } from "../web/static/privacy.js";
+
+test("emergency: the NFC size is the NDEF text record with its wrapping, in UTF-8 bytes", () => {
+  // the same figures as core/emergency.py (tests/test_emergency.py)
+  assert.deepEqual(NFC_TAGS.map((tag) => tag.capacity), [144, 504, 888]);
+  assert.equal(ndefSize("", "en"), 10);
+  assert.equal(ndefSize("abc", "en"), 13);
+  assert.equal(ndefSize("абв", "uk"), 16);
+  assert.equal(utf8Size("ñ"), 2);
+  assert.equal(ndefSize("a".repeat(252), "en"), 1 + 3 + 3 + 1 + 255 + 1);
+  assert.equal(ndefSize("a".repeat(253), "en"), 3 + 5 + 3 + 253 + 3 + 1);
+});
+
+test("emergency: over budget is reported with the overflow, the text is never shortened", () => {
+  const edge = "a".repeat(134);
+  assert.deepEqual(nfcBudget(edge).tags.map((tag) => tag.fits), [true, true, true]);
+  const long = "Ліки: ".repeat(60);
+  const budget = nfcBudget(long, "uk");
+  assert.equal(budget.chars, [...long].length);
+  assert.equal(budget.textBytes, utf8Size(long));
+  const ntag215 = budget.tags.find((tag) => tag.tag === "NTAG215");
+  assert.equal(ntag215.fits, false);
+  assert.equal(ntag215.over, budget.size - 504);
+  assert.equal(budget.tags.find((tag) => tag.tag === "NTAG213").over, budget.size - 144);
+});
+
+test("emergency: copying falls back when the Clipboard API is missing or refuses", async () => {
+  const copied = [];
+  assert.equal(await copyText("x", { writeText: async (s) => { copied.push(s); } }, () => false), "copied");
+  assert.deepEqual(copied, ["x"]);
+  assert.equal(await copyText("y", undefined, (s) => s === "y"), "copied");
+  assert.equal(await copyText("z", { writeText: async () => { throw new Error("denied"); } }, () => true), "copied");
+  assert.equal(await copyText("z", null, () => false), "failed");
+  assert.equal(await copyText("z", null, () => { throw new Error("no execCommand"); }), "failed");
+});
+
+test("emergency: every lock-screen field lands on one side of the wallet card", () => {
+  const keys = ["conditions", "medications", "allergies", "blood_type", "emergency_contact", "notes", "new_field"];
+  const sides = cardSides(keys.map((key) => ({ key })));
+  assert.deepEqual(sides.front.map((f) => f.key), ["allergies", "blood_type", "emergency_contact"]);
+  assert.deepEqual(sides.back.map((f) => f.key), ["conditions", "medications", "notes", "new_field"]);
+  assert.equal(packetLang("es"), "es");
+  assert.equal(packetLang("de"), "en");
+});
+
+test("emergency: the page comes after the visit report", () => {
+  const ids = PAGES.map((page) => page.id);
+  assert.equal(ids.indexOf("emergency"), ids.indexOf("report") + 1);
+});
+
+test("privacy blur: Alt+Shift+B toggles, but not while typing", () => {
+  const key = (target, extra = {}) => ({ altKey: true, shiftKey: true, ctrlKey: false, metaKey: false, code: "KeyB", target, ...extra });
+  assert.equal(isBlurShortcut(key({ tagName: "BODY" })), true);
+  assert.equal(isBlurShortcut(key({ tagName: "TEXTAREA" })), false);
+  assert.equal(isBlurShortcut(key({ tagName: "DIV", isContentEditable: true })), false);
+  assert.equal(isBlurShortcut(key({ tagName: "BODY" }, { ctrlKey: true })), false);
+  assert.equal(isBlurShortcut(key({ tagName: "BODY" }, { code: "KeyN" })), false);
+});

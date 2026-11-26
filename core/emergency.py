@@ -104,10 +104,10 @@ STRINGS: dict[str, dict[str, str]] = {
                     "розблоковуючи. Пишіть туди лише те, що вирішите самі: без адреси, без номерів "
                     "документів. Пасивна NFC-мітка не веде журналу, хто її читав. health-os ніколи "
                     "не пише в телефон чи мітку: ви копіюєте текст туди самі."),
-        "nfc.fits": "{size} байтів на мітці: вміщується в {tag} ({capacity} байтів).",
-        "nfc.over": ("{size} байтів на мітці: не вміщується в {tag} ({capacity} байтів), зайві "
-                     "{over} байтів. Нічого не обрізано: скоротіть текст самі або візьміть більшу "
-                     "мітку."),
+        # "Б" (байт): no plural form to pick for the number
+        "nfc.fits": "На мітці {size} Б: вміщується в {tag} ({capacity} Б).",
+        "nfc.over": ("На мітці {size} Б: не вміщується в {tag} ({capacity} Б), зайві {over} Б. "
+                     "Нічого не обрізано: скоротіть текст самі або візьміть більшу мітку."),
         "empty": "Профілю ще немає: на екран блокування нічого покласти.",
     },
     "es": {
@@ -281,7 +281,8 @@ def build(conn, lang: str = "en", tz: tzinfo | None = None) -> dict:
     lang = lang if lang in LANGUAGES else "en"
     now = conn.execute(text("SELECT now()")).scalar().astimezone(tz)
     as_of = now.date()
-    base = {"lang": lang, "as_of": as_of, "generated_at": now,
+    base = {"lang": lang, "as_of": as_of, "generated_at": now, "title": _t(lang, "nfc.title"),
+            "as_of_text": _t(lang, "as_of", date=as_of.isoformat()),
             "notice": _t(lang, "notice"), "privacy": _t(lang, "privacy")}
     uid = q.user_id(conn)
     data = _read(conn, uid) if uid else None

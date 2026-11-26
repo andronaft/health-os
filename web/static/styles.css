@@ -2097,3 +2097,325 @@ tbody tr:last-child td {
     overflow: visible;
   }
 }
+
+/* Privacy blur (#63): a class on <body> blurs values, dates and names — table cells, list items,
+   numbers, the record's free text, every chart (ECharts paints axes and tooltips on its canvas, so
+   the whole chart box is blurred) — and leaves headings, labels and controls readable. The
+   critical-values alert stays in plain sight: only its numbers are blurred. A new element that
+   shows data and none of these covers it can take the class "private". */
+.privacy-toggle-slot {
+  padding-inline: 1rem;
+}
+
+.privacy-toggle {
+  width: 100%;
+  font-size: 0.9rem;
+}
+
+.privacy-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+body.privacy-blur main :is(
+  td, tbody th, dd, pre, textarea, input, time, figcaption, svg, .chart,
+  li:not(.critical-row, .emergency-field, .emergency-tags li),
+  p:not(.quiet, .footnote, .state-note, .state-title, .tile-key, .critical-disclaimer, .report-title,
+        .report-footer, .report-method, .emergency-notice, .emergency-edited, .emergency-warning,
+        .wallet-title, .wallet-label, .emergency-privacy p, .critical-row p, :has(> a:only-child)),
+  .critical-value, .tile-value, .rec-cards h3, .rec-allergies, .matrix, .hb-grid, .vitals-heatmap,
+  .vitals-readout, .diary .quiet, .vitals-head .quiet, .tile .quiet, .review-source .quiet,
+  .food-period, .tl-years, .tl-caption, .private
+) {
+  filter: blur(0.35rem);
+}
+
+/* column headings and the alert's own words stay readable */
+body.privacy-blur main :is(thead th, .critical h2, .critical-disclaimer) {
+  filter: none;
+}
+
+/* blurred text must not be read back through a selection either */
+body.privacy-blur main :is(td, li, p, pre, textarea, .chart, svg) {
+  user-select: none;
+}
+
+@media (max-width: 47.99rem) {
+  .sidebar {
+    grid-template-columns: 1fr auto auto;
+  }
+
+  .privacy-toggle-slot {
+    grid-row: 1;
+    grid-column: 2;
+    padding-inline: 0;
+  }
+
+  .privacy-toggle {
+    padding-inline: 0.5rem;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+
+  .brand,
+  .theme-picker label {
+    white-space: nowrap;
+  }
+
+  .theme-picker {
+    grid-column: 3;
+  }
+}
+
+/* The emergency packet (#74): the lock screen's fields as cards with a copy button, the NFC text
+   with its size against each tag, a wallet card that folds once (two 85.6 × 54 mm sides) */
+.emergency {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  max-width: 60rem;
+}
+
+.emergency-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1.5rem;
+}
+
+.emergency-controls p {
+  margin: 0;
+}
+
+.emergency-privacy {
+  padding: 0.75rem 1rem;
+  border: 2px solid var(--high);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--high) 8%, var(--surface));
+}
+
+.emergency-privacy p,
+.emergency-head p {
+  margin: 0;
+}
+
+.emergency-asof {
+  font-weight: 600;
+}
+
+.emergency-notice {
+  color: var(--muted);
+}
+
+.emergency-section h2 {
+  margin-bottom: 0.25rem;
+}
+
+.emergency-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr));
+  gap: 0.75rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.emergency-field[data-recorded="false"] {
+  border-style: dashed;
+}
+
+.emergency-field-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+}
+
+.emergency-field-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.emergency-copy-wrap {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-inline-start: auto;
+}
+
+.emergency-copy-status {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.emergency-field-text {
+  margin: 0.5rem 0 0;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.emergency-nfc-text {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+}
+
+.emergency-nfc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-top: 0.5rem;
+}
+
+.emergency-nfc-actions .emergency-copy-wrap {
+  margin-inline-start: 0;
+}
+
+.emergency-edited {
+  color: var(--high);
+  font-weight: 600;
+}
+
+.emergency-nfc-size {
+  font-weight: 600;
+}
+
+.emergency-tags {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.emergency-tags li {
+  display: grid;
+  grid-template-columns: 10rem minmax(4rem, 14rem) auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.emergency-tags meter {
+  width: 100%;
+}
+
+.emergency-tags li[data-fits="true"] .emergency-tag-verdict {
+  color: var(--in-range);
+}
+
+.emergency-tags li[data-fits="false"] .emergency-tag-verdict {
+  color: var(--critical);
+  font-weight: 600;
+}
+
+.emergency-warning {
+  padding: 0.5rem 0.75rem;
+  border-inline-start: 4px solid var(--high);
+  background: color-mix(in srgb, var(--high) 8%, var(--surface));
+}
+
+.emergency-print {
+  margin-top: 0.5rem;
+}
+
+.wallet-sheet {
+  margin-top: 0.75rem;
+  overflow-x: auto;
+}
+
+/* two sides of a credit card (ISO/IEC 7810 ID-1, 85.6 × 54 mm) side by side; fold along the middle
+   with the print outside. A side that is too full grows taller (and says so), never clips. */
+.wallet-card {
+  display: grid;
+  grid-template-columns: 85.6mm 85.6mm;
+  width: max-content;
+  border: 1px dashed var(--control-border);
+  background: #fff;
+  color: #1d1d1f;
+  font-size: 6.5pt;
+  line-height: 1.25;
+}
+
+/* measured at the card's height first (emergency.js); a side found too full grows instead */
+.wallet-side {
+  box-sizing: border-box;
+  height: 54mm;
+  padding: 3mm 3.5mm;
+  overflow: hidden;
+}
+
+.wallet-card[data-overflow="true"] .wallet-side {
+  height: auto;
+  min-height: 54mm;
+}
+
+.wallet-side + .wallet-side {
+  border-inline-start: 1px dashed #8a8a85;
+}
+
+.wallet-title {
+  margin: 0 0 1.5mm;
+  color: #b42318;
+  font-size: 8pt;
+  font-weight: 700;
+}
+
+.wallet-field {
+  margin-bottom: 1.2mm;
+}
+
+.wallet-field p {
+  margin: 0;
+}
+
+.wallet-label {
+  font-size: 5.5pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.wallet-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 47.99rem) {
+  .emergency-tags li {
+    grid-template-columns: 1fr;
+    gap: 0.15rem;
+  }
+}
+
+@page emergency {
+  size: A4;
+  margin: 15mm;
+}
+
+@media print {
+  main:has(.emergency) > h1,
+  .content:has(.emergency) > footer,
+  .emergency > :not(.emergency-wallet),
+  .emergency-wallet > :not(.wallet-sheet) {
+    display: none !important;
+  }
+
+  .emergency {
+    page: emergency;
+  }
+
+  .wallet-sheet {
+    overflow: visible;
+  }
+
+  .wallet-card {
+    break-inside: avoid;
+    print-color-adjust: exact;
+  }
+}

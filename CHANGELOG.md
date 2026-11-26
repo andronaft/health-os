@@ -7,6 +7,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 ## [Unreleased]
 
 ### Added
+- Emergency packet (#74): `core/emergency.py` builds, from approved data only and with no model,
+  what a paramedic can read without unlocking the phone — allergies with reaction and severity
+  (unverified ones included and marked), current medications with dose, active diagnoses (a
+  suspected or provisional one says so; resolved and refuted ones are left out), blood type,
+  emergency contact, "as of <date>" and a fixed line that it comes from a personal record, not a
+  clinical system. Two layouts: one block per lock-screen Medical ID field, and one NFC-tag text
+  with its size (the NDEF text record as written) against NTAG213/215/216 user memory (144/504/888
+  bytes, NXP data sheet §8.5); over budget it says by how much and never cuts anything. New MCP read
+  tool `get_emergency_packet(layout, lang)` (en/uk/es) — 40 tools — and `GET /api/v1/emergency`.
+- Browser UI: the **Emergency** page — a copy button per Medical ID field (Clipboard API, with a
+  fallback that selects the text), the NFC text with a live byte counter per tag (edit it here to
+  shorten it yourself), and a printable wallet card: two credit-card sides (85.6 × 54 mm) that fold
+  once, printed alone on the page; a card too full prints taller and says so. Its language is chosen
+  apart from the UI's. A privacy warning says the lock screen and a tag are readable by anyone.
+- Browser UI: privacy blur (#63). A "Blur values" switch in the header (or Alt+Shift+B) blurs
+  values, dates and names on every page, charts included, for screenshots and demos; the
+  critical-values alert stays visible with only its numbers blurred. Remembered in this browser.
 - Browser UI: the medical-record pages (#57). **Timeline**: the whole record on one axis, in
   lanes (diagnoses; visits, procedures and hospital stays; lab panels; vaccinations; documents),
   with medications and habits drawn as bars from start to stop (to today while ongoing). A

@@ -14,12 +14,18 @@ const EN = {
   "nav.habits": "Habits",
   "nav.review": "Review queue",
   "nav.report": "Visit report",
+  "nav.emergency": "Emergency",
   "nav.soon": "soon",
 
   "theme.label": "Theme",
   "theme.auto": "Auto",
   "theme.light": "Light",
   "theme.dark": "Dark",
+
+  // privacy blur (#63)
+  "privacy.blur": "Blur values",
+  "privacy.blur_on": "Values blurred",
+  "privacy.hint": "Blurs values, dates and names everywhere, for screenshots and demos (Alt+Shift+B)",
 
   // "normal" is the stored value; on screen a value is only ever in or out of its range
   "status.low": "low",
@@ -657,6 +663,30 @@ const EN = {
   "vitals.heatmap.summary": "{n} of {days} days have a value; the middle half lies between {q1} and {q3} {unit}",
   "vitals.heatmap.more": "more",
   "vitals.heatmap.less": "less",
+
+  // the emergency packet (#74)
+  "emergency.language": "Packet language",
+  "emergency.note": "The packet below is in its own language, for whoever finds the phone, the tag or the card. health-os never writes to the phone or a tag: you copy each block yourself.",
+  "emergency.privacy.title": "Readable by anyone.",
+  "emergency.lock.title": "Lock screen",
+  "emergency.lock.lead": "One block per field of the phone's lock-screen medical info: iOS Medical ID (Health → Medical ID) or Android Emergency information. Copy a block and paste it into that field.",
+  "emergency.copy": "Copy",
+  "emergency.copied": "Copied",
+  "emergency.copy_failed": "Copying was blocked: the text is selected, press Ctrl+C or ⌘C",
+  "emergency.not_recorded": "nothing recorded",
+  "emergency.nfc.title": "NFC tag",
+  "emergency.nfc.lead": "One text for a tag, to write with your own NFC app. If it is too long you may shorten it here: health-os never cuts it for you. Edits stay on this page and are gone on reload.",
+  "emergency.nfc.reset": "Back to the full text",
+  "emergency.nfc.edited": "Edited here: this is no longer the whole packet as recorded.",
+  "emergency.nfc.size": "{size} bytes on the tag ({text} bytes of text, {chars} characters)",
+  "emergency.nfc.tag": "{tag} · {capacity} bytes",
+  "emergency.nfc.fits": "fits",
+  "emergency.nfc.over": "does not fit: {over} bytes over",
+  "emergency.nfc.source": "Tag sizes are the user memory in NXP's NTAG213/215/216 data sheet (Rev. 3.2, §8.5): 144, 504 and 888 bytes. The size counts the NDEF text record as written to the tag, wrapping included; text is UTF-8, so a Cyrillic or accented letter takes 2 bytes.",
+  "emergency.card.title": "Wallet card",
+  "emergency.card.lead": "Credit-card size (85.6 × 54 mm) when folded once along the middle. Print at 100 % scale, cut along the dashed outline.",
+  "emergency.card.print": "Print the wallet card",
+  "emergency.card.overflow": "This does not fit on a credit-card size card: it prints taller instead, with nothing cut. Keep the full list on the lock screen, or shorten what is recorded.",
 };
 
 export function t(key, vars = {}) {
