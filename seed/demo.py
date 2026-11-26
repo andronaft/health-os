@@ -290,6 +290,34 @@ def _load_wearables(conn, uid: str, today: date) -> None:
            FROM observation_types ot WHERE ot.id = :tid"""), rows)
 
 
+# the watch's recorded workouts (#75): (weekday, hour, type, minutes) — a ride on Saturdays and a
+# step-free gym session on Wednesdays, the kind of exercise the "still minutes" rule must not
+# count as sitting with a high heart rate
+DEMO_WORKOUTS = [(5, 9, "cycling", 75), (2, 18, "traditional_strength_training", 50)]
+
+
+def workouts(today: date) -> list[tuple[datetime, str, int]]:
+    """(start, type, minutes) of the demo's workouts over its year, oldest first; none on days
+    without the watch."""
+    out = []
+    for ago in range(WEARABLE_DAYS - 1, -1, -1):
+        day = today - timedelta(days=ago)
+        for weekday, hour, kind, minutes in DEMO_WORKOUTS:
+            if day.weekday() == weekday and ago not in WEARABLE_GAPS:
+                out.append((_at(today, ago, hour), kind, minutes))
+    return out
+
+
+def _load_workouts(conn, uid: str, today: date) -> None:
+    source = get_or_create_channel_source(conn, uid, "garmin")
+    conn.execute(text(
+        """INSERT INTO physical_activities (user_id, activity_date, activity_type,
+               duration_minutes, external_id, source_id)
+           VALUES (:u, :at, :kind, :minutes, :ext, :sid)"""),
+        [{"u": uid, "at": at, "kind": kind, "minutes": minutes, "sid": source,
+          "ext": f"demo:{kind}:{at.isoformat()}"} for at, kind, minutes in workouts(today)])
+
+
 def _rows(markers: dict) -> list[dict]:
     return [{"raw_name": name, "value": v, "unit": u, "ref_min": lo, "ref_max": hi}
             for name, (v, u, lo, hi) in markers.items()]
@@ -339,6 +367,7 @@ def load_demo(conn, *, today: date | None = None) -> str:
         at = datetime.combine(today - timedelta(days=d), datetime.min.time()) + timedelta(hours=8)
         ingest_observation(conn, uid, "Weight", 68.4 - d * 0.05, "kg", effective_at=at)
     _load_wearables(conn, uid, today)
+    _load_workouts(conn, uid, today)
 
     for days_ago, hour, meal_type, desc, wellbeing, nutrients in MEALS:
         at = datetime.combine(today - timedelta(days=days_ago), datetime.min.time())

@@ -74,6 +74,12 @@ export function sustainedFootnote(sustained, lang = "en") {
   });
 }
 
+/** Sentences about what the list can't tell apart: no workouts recorded while the minutes rule ran. */
+export function sustainedNotes(sustained, lang = "en") {
+  const { t } = sustainedTranslator(lang);
+  return sustained.minutes_rule === "checked" && sustained.workouts_recorded === false ? [t("no_workouts")] : [];
+}
+
 /** The empty or not-checked sentence. */
 export function sustainedEmpty(sustained, lang = "en") {
   const { t, tn } = sustainedTranslator(lang);

@@ -220,7 +220,12 @@ def get_anomalies(type_code: str = "", days: int = 90, z_threshold: float = 2.0)
     thresholds are initial defaults, to be reviewed (`sustained.params`). Word them as "worth
     checking", never as alarming. What the rule can't see: there is no ECG, only wrist sensors;
     days and minutes when the watch was off are gaps, not normal days; and with fewer than 30
-    days of values in the 60 before, nothing is checked."""
+    days of values in the 60 before, nothing is checked; without any recorded workout, step-free
+    exercise (cycling, rowing, gym) can't be told from sitting still (`sustained.notes` says so).
+    Sources: Garmin's daily import gives resting HR and HRV (RMSSD-based) — the days rule only;
+    Apple Health gives resting HR and HRV as SDNN (`hrv_sdnn`, its own baseline) — the days rule —
+    and raw heart rate, steps and workouts — the minutes rule. If the check itself fails,
+    `sustained.error` says so and the rest of the result stands."""
     from datetime import UTC, datetime, timedelta
 
     from analytics.baselines import check_anomaly
@@ -267,7 +272,10 @@ def get_anomalies(type_code: str = "", days: int = 90, z_threshold: float = 2.0)
                               "z": round(res.z, 2) if res.z is not None else None,
                               "detail": res.detail})
     anomalies.sort(key=lambda a: -abs(a["z"] or 0))
-    sustained = _sustained(code, days)
+    try:
+        sustained = _sustained(code, days)
+    except Exception as e:  # noqa: BLE001 — the latest-value check above must still be returned
+        sustained = {"findings": [], "error": f"the sustained check failed: {type(e).__name__}: {e}"}
     return json.dumps({"window_days": days, "z_threshold": z_threshold,
                        "markers_checked": checked, "skipped_short_history": too_short,
                        "anomalies": anomalies, **missing, "sustained": sustained,

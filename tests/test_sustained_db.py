@@ -16,6 +16,7 @@ from core.db import engine
 from core.services import add_medication, get_or_create_channel_source, get_or_create_user
 from mcp_server import tools
 from seed.demo import WEARABLE_EPISODE, load_demo
+from seed.demo import workouts as demo_workouts
 
 HEADERS = {"X-Health-OS-Token": "t"}
 UTCZ = ZoneInfo("UTC")
@@ -170,3 +171,71 @@ def test_get_anomalies_has_a_sustained_section():
     finally:
         with engine.begin() as c:
             c.execute(text("DELETE FROM observations WHERE source_id = :s"), {"s": source})
+
+
+# ---- workouts: recorded or not (#75 review) ------------------------------------------------------
+
+def _a_still_hour_of_exercise(conn, uid, today):
+    """Resting history, and yesterday 30 min at 120 bpm with no steps (a ride, a row, a gym set)."""
+    _resting(conn, uid, today, elevated=())
+    start = datetime.combine(today - timedelta(days=1), datetime.min.time(), UTC) + timedelta(hours=18)
+    _samples(conn, uid, "heart_rate", start - timedelta(hours=1), 55, 62)
+    _samples(conn, uid, "heart_rate", start, 30, 120)
+    _samples(conn, uid, "heart_rate", start + timedelta(minutes=35), 30, 62)
+    return start
+
+
+def test_without_any_workout_recorded_the_list_says_so(conn, user_id, today):
+    _a_still_hour_of_exercise(conn, user_id, today)
+    out = sustained.find(conn, user_id, today - timedelta(days=6), today, UTCZ)
+    assert out["minutes_rule"] == "checked" and out["workouts_recorded"] is False
+    assert [f["kind"] for f in out["findings"]] == ["minutes"]
+    assert "No workouts are recorded" in out["notes"][0]
+
+
+def test_a_recorded_workout_removes_the_finding_and_the_note(conn, user_id, today):
+    start = _a_still_hour_of_exercise(conn, user_id, today)
+    conn.execute(text(
+        """INSERT INTO physical_activities (user_id, activity_date, activity_type, duration_minutes)
+           VALUES (:u, :at, 'rowing', 30)"""), {"u": user_id, "at": start})
+    out = sustained.find(conn, user_id, today - timedelta(days=6), today, UTCZ)
+    assert out["findings"] == [] and out["notes"] == [] and out["workouts_recorded"] is True
+
+
+def test_without_raw_samples_the_minutes_rule_says_it_did_not_run(conn, user_id, today):
+    _resting(conn, user_id, today, elevated=())
+    out = sustained.find(conn, user_id, today - timedelta(days=6), today, UTCZ)
+    assert out["minutes_rule"] == "no_samples" and out["notes"] == []
+
+
+def test_the_demo_records_workouts_and_lists_them_as_context(conn, get, today):
+    load_demo(conn, today=today)
+    lasting = get("?days=30&tz=UTC")["sustained"]
+    assert lasting["workouts_recorded"] is True and lasting["minutes_rule"] == "no_samples"
+    [finding] = lasting["findings"]
+    first, last = date.fromisoformat(finding["first_day"]), date.fromisoformat(finding["last_day"])
+    expected = [{"kind": "workout", "day": at.date().isoformat(), "type": kind, "minutes": minutes}
+                for at, kind, minutes in demo_workouts(today) if first <= at.date() <= last]
+    assert finding["context"] == expected
+
+
+def test_apple_resting_hr_and_sdnn_reach_the_page(conn, user_id, get, today):
+    for ago in range(70):
+        _value(conn, user_id, "hrv_sdnn", today - timedelta(days=ago),
+               17 if ago in (2, 1, 0) else 30 + (-2, 0, 2, 0)[ago % 4])
+    [finding] = get("?days=7&tz=UTC")["sustained"]["findings"]
+    assert [m["code"] for m in finding["metrics"]] == ["hrv_sdnn"]
+
+
+@pytest.mark.integration
+def test_a_failing_sustained_check_keeps_the_rest_of_get_anomalies(monkeypatch):
+    def broken(code, days):
+        raise RuntimeError("boom")
+
+    with engine.begin() as c:
+        get_or_create_user(c)
+
+    monkeypatch.setattr(tools, "_sustained", broken)
+    out = json.loads(tools.get_anomalies())
+    assert "anomalies" in out and "markers_checked" in out
+    assert out["sustained"] == {"findings": [], "error": "the sustained check failed: RuntimeError: boom"}

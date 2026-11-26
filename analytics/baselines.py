@@ -108,9 +108,11 @@ class SustainedParams:
     # steady history has a tiny spread; 1 bpm is not a change)
     daily: Mapping[str, Mapping] = field(default_factory=lambda: {
         "resting_hr": {"direction": "up", "min_delta": 3.0},   # bpm
-        "hrv": {"direction": "down", "min_delta": 5.0},        # ms
+        "hrv": {"direction": "down", "min_delta": 5.0},        # ms, Garmin (RMSSD-based)
+        "hrv_sdnn": {"direction": "down", "min_delta": 5.0},   # ms, Apple (SDNN): own baseline
     })
-    paired: tuple[str, str] = ("resting_hr", "hrv")  # reported together when their days overlap
+    # runs of the first code and of any other one that share days are reported together
+    paired: tuple[str, ...] = ("resting_hr", "hrv", "hrv_sdnn")
     hr_above_resting: float = 30.0   # bpm above the resting median, intraday
     min_minutes: int = 20            # that long, intraday
     max_sample_gap_minutes: int = 10  # two heart rate samples further apart break a run
@@ -128,7 +130,11 @@ class SustainedParams:
 
 
 DEFAULTS = SustainedParams()
-HR_CODES = ("resting_hr", "hrv", "heart_rate")  # the codes a beta blocker changes
+HR_CODES = ("resting_hr", "hrv", "hrv_sdnn", "heart_rate")  # the codes a beta blocker changes
+# what each source feeds (#75): say it wherever the rules are described
+SOURCES = ("Garmin (daily import): resting heart rate and HRV (RMSSD-based) — the days rule only. "
+           "Apple Health: resting heart rate and HRV as SDNN (its own baseline, never mixed with "
+           "Garmin's) — the days rule; raw heart rate, steps and workouts — the minutes rule.")
 LIMITS = ("No ECG: wrist sensors only (optical heart rate, which drifts with fit and movement). "
           "Days and minutes when the watch was off are gaps, not normal days. The baseline is "
           "your own history only: with fewer than {min} days of values in the {days} before, "
@@ -136,7 +142,7 @@ LIMITS = ("No ECG: wrist sensors only (optical heart rate, which drifts with fit
 
 
 def limits_text(params: SustainedParams = DEFAULTS) -> str:
-    return LIMITS.format(min=params.min_baseline_days, days=params.baseline_days)
+    return LIMITS.format(min=params.min_baseline_days, days=params.baseline_days) + " " + SOURCES
 
 
 @dataclass
@@ -190,19 +196,22 @@ def daily_runs(code: str, series: Mapping[date, float],
                and _outside(series[days[j]], rng, rule, params)):
             run.append(days[j])
             j += 1
-        if len(run) >= params.run_days:
-            deltas = [series[d] - rng.median for d in run]
-            far = max if rule["direction"] == "up" else min
-            runs.append({
-                "code": code, "direction": rule["direction"],
-                "first_day": run[0], "last_day": run[-1], "days": len(run),
-                "usual": round(rng.median, 1), "spread": round(rng.spread, 1),
-                "baseline_days": rng.n, "threshold": round(_margin(rng, rule, params), 1),
-                "mean_delta": round(sum(deltas) / len(deltas), 1),
-                "max_delta": round(far(deltas), 1),
-                "values": [[d, series[d]] for d in run],
-            })
-        i = j  # a run, long or short, is not re-entered from its second day
+        if len(run) < params.run_days:
+            # too short: its next days may still start a run of their own, on their own baseline
+            i += 1
+            continue
+        deltas = [series[d] - rng.median for d in run]
+        far = max if rule["direction"] == "up" else min
+        runs.append({
+            "code": code, "direction": rule["direction"],
+            "first_day": run[0], "last_day": run[-1], "days": len(run),
+            "usual": round(rng.median, 1), "spread": round(rng.spread, 1),
+            "baseline_days": rng.n, "threshold": round(_margin(rng, rule, params), 1),
+            "mean_delta": round(sum(deltas) / len(deltas), 1),
+            "max_delta": round(far(deltas), 1),
+            "values": [[d, series[d]] for d in run],
+        })
+        i = j  # a counted run is not re-entered from its second day
     return runs
 
 
@@ -214,8 +223,9 @@ def pair_runs(runs: list[dict], params: SustainedParams = DEFAULTS) -> list[dict
     """Findings, oldest first: resting heart rate runs and HRV runs that share a day are one
     finding, transitively (one long HRV run across two resting heart rate runs joins all three);
     `together_days`: on how many days both were outside. Every other run is its own finding."""
-    a, b = params.paired
-    paired = [r for r in runs if r["code"] in (a, b)]
+    a, partners = params.paired[0], params.paired[1:]
+    order = {code: k for k, code in enumerate(params.paired)}
+    paired = [r for r in runs if r["code"] in order]
     group = list(range(len(paired)))
 
     def root(i: int) -> int:
@@ -233,12 +243,12 @@ def pair_runs(runs: list[dict], params: SustainedParams = DEFAULTS) -> list[dict
         groups.setdefault(root(i), []).append(r)
     findings = []
     for members in groups.values():
-        members.sort(key=lambda r: (r["code"] != a, r["first_day"]))
+        members.sort(key=lambda r: (order[r["code"]], r["first_day"]))
         days_a = {d for r in members if r["code"] == a for d, _ in r["values"]}
-        days_b = {d for r in members if r["code"] == b for d, _ in r["values"]}
+        days_b = {d for r in members if r["code"] in partners for d, _ in r["values"]}
         together = len(days_a & days_b) if days_a and days_b else None
         findings.append({"metrics": members, "together_days": together})
-    findings += [{"metrics": [r], "together_days": None} for r in runs if r["code"] not in (a, b)]
+    findings += [{"metrics": [r], "together_days": None} for r in runs if r["code"] not in order]
     out = []
     for f in findings:
         first, last = _span(f["metrics"])

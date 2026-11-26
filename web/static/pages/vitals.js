@@ -8,7 +8,9 @@ import {
   bpKey, bpOption, diaryState, diaryView, heatmapOption, heatmapSummary, panelTitle, pressure, readoutAt,
   wearableHeight, wearableOption, wearablePanels, windowLinks,
 } from "./vitals-model.js";
-import { findingView, sustainedEmpty, sustainedFootnote, sustainedState, withShading } from "./sustained-model.js";
+import {
+  findingView, sustainedEmpty, sustainedFootnote, sustainedNotes, sustainedState, withShading,
+} from "./sustained-model.js";
 import { sustainedTranslator } from "./sustained-strings.js";
 
 const section = (title, ...children) =>
@@ -120,6 +122,7 @@ function sustainedList(sustained) {
     el("h3", { id: "sustained-title" }, t("title")),
     el("p", { class: "quiet" }, t("note")),
     items.length ? el("ul", { class: "plain sustained-list" }, ...items) : el("p", {}, sustainedEmpty(sustained, LANG)),
+    ...sustainedNotes(sustained, LANG).map((note) => el("p", { class: "sustained-note" }, note)),
     el("p", { class: "quiet footnote" }, sustainedFootnote(sustained, LANG)));
 }
 

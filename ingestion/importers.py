@@ -2,7 +2,7 @@
 
 Apple Health: raw samples → device_samples (upsert, dedup of the cumulative export);
 daily aggregates of mapped types → observations (auto-approve); event flags → device_alerts
-(+ a red-flag alert for irregular rhythm).
+(+ a red-flag alert for irregular rhythm); workouts → physical_activities (once each).
 """
 from __future__ import annotations
 
@@ -12,7 +12,9 @@ from core.services import get_or_create_channel_source
 from ingestion.apple_health import daily_aggregates, parse
 
 # write daily aggregates only for types that have observation_types
-_AGG_TO_OBS = {"heart_rate", "spo2", "body_weight", "body_temp"}
+# resting_hr and hrv_sdnn feed the personal baselines of #75 (hrv_sdnn is Apple's SDNN, kept
+# apart from Garmin's RMSSD-based hrv)
+_AGG_TO_OBS = {"heart_rate", "resting_hr", "hrv_sdnn", "spo2", "body_weight", "body_temp"}
 
 
 def import_apple_health(conn, user_id: str, xml: str, alerter=None) -> dict:
@@ -81,8 +83,29 @@ def import_apple_health(conn, user_id: str, xml: str, alerter=None) -> dict:
                     f"Apple Watch: {al.alert_type} at {al.detected_at:%Y-%m-%d %H:%M} "
                     "(consumer device, not a diagnosis) — discuss with your doctor.")
 
+    # 4) workouts → physical_activities, once each: the export is cumulative, so a workout is
+    # known by its type and start (external_id) and never inserted twice
+    n_workouts = 0
+    for w in parsed.workouts:
+        res = conn.execute(
+            text(
+                """INSERT INTO physical_activities (user_id, activity_date, activity_type,
+                       duration_minutes, external_id, raw_data, source_id)
+                   SELECT :u, :start, :type, :minutes, :ext,
+                          jsonb_build_object('end', CAST(:end AS text), 'source', CAST(:src AS text)),
+                          :sid
+                   WHERE NOT EXISTS (
+                       SELECT 1 FROM physical_activities WHERE user_id=:u AND external_id=:ext
+                         AND deleted_at IS NULL)"""
+            ),
+            {"u": user_id, "start": w.start, "type": w.activity_type, "minutes": w.minutes,
+             "ext": f"apple_health:{w.activity_type}:{w.start.isoformat()}",
+             "end": w.end.isoformat() if w.end else None, "src": w.source, "sid": source_id},
+        )
+        n_workouts += res.rowcount
+
     out = {"samples_inserted": inserted, "daily_observations": n_obs,
-           "device_alerts": n_alerts, "source_id": source_id,
+           "device_alerts": n_alerts, "workouts": n_workouts, "source_id": source_id,
            "skipped_unknown_unit": [
                {"type_code": tc, "unit": unit, "records": n}
                for (tc, unit), n in sorted(parsed.skipped_units.items(), key=lambda kv: str(kv[0]))]}
@@ -93,5 +116,5 @@ def import_apple_health(conn, user_id: str, xml: str, alerter=None) -> dict:
 
 
 def _canonical_unit(type_code: str) -> str:
-    return {"heart_rate": "bpm", "spo2": "%", "body_weight": "kg", "body_temp": "Cel"}.get(
-        type_code, "")
+    return {"heart_rate": "bpm", "resting_hr": "bpm", "hrv_sdnn": "ms", "spo2": "%",
+            "body_weight": "kg", "body_temp": "Cel"}.get(type_code, "")

@@ -258,3 +258,22 @@ def test_the_tool_description_says_what_the_rule_cant_see():
     tool = next(t for t in asyncio.run(mcp.list_tools()) if t.name == "get_anomalies")
     for words in ("no ECG", "wrist sensors only", "watch was off", "worth checking", "initial defaults"):
         assert words in tool.description, words
+
+
+def test_apple_sdnn_has_its_own_baseline_and_pairs_with_resting_hr():
+    """Garmin's HRV (RMSSD-based, ~45 ms here) and Apple's SDNN (~30 ms) never share a baseline:
+    an SDNN at Garmin's usual level is not "up", and Garmin's days don't hide an SDNN drop."""
+    rhr = with_days(history(58), {3: 66, 2: 67, 1: 66})
+    garmin = history(45, wobble=3)
+    sdnn = with_days(history(30, wobble=2), {2: 18, 1: 17, 0: 19})
+    [finding] = sustained_days({"resting_hr": rhr, "hrv": garmin, "hrv_sdnn": sdnn},
+                               since=TODAY - timedelta(days=30), tz=UTCZ)
+    assert [m["code"] for m in finding["metrics"]] == ["resting_hr", "hrv_sdnn"]
+    assert finding["metrics"][1]["usual"] == 30 and finding["together_days"] == 2
+
+
+def test_a_short_runs_later_days_are_tried_as_starts():
+    # a lone day out, a day back, then three: the run is found from its own first day
+    rhr = with_days(history(58), {5: 66, 4: 58, 3: 66, 2: 67, 1: 66})
+    [run] = daily_runs("resting_hr", rhr)
+    assert run["first_day"] == TODAY - timedelta(days=3) and run["days"] == 3

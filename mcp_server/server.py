@@ -256,7 +256,11 @@ def get_anomalies(type_code: str = "", days: int = 90, z_threshold: float = 2.0)
     those days, a current beta blocker) is listed; it doesn't change the rule. Thresholds are
     initial defaults, to be reviewed. Present these as "worth checking", never as alarming. What
     the rule can't see: no ECG, wrist sensors only; days and minutes when the watch was off are
-    gaps, not normal days; fewer than 30 days of values in the 60 before → nothing is checked."""
+    gaps, not normal days; fewer than 30 days of values in the 60 before → nothing is checked;
+    with no workout recorded at all, step-free exercise (cycling, rowing, gym) can't be told from
+    sitting still (`sustained.notes` says so). Sources: Garmin's daily import → resting HR and
+    HRV (RMSSD-based), days rule only; Apple Health → resting HR and HRV SDNN (`hrv_sdnn`, its own
+    baseline) for the days rule, raw heart rate, steps and workouts for the minutes rule."""
     return tools.get_anomalies(type_code, days, z_threshold)
 
 

@@ -386,7 +386,9 @@ def vitals(conn, lang: str = "en", days=DEFAULT_WINDOW, tz: tzinfo | None = None
     load_since = since - timedelta(days=CHRONIC_DAYS - 1)
     # sustained deviations (#75) need the days before the window too: their own baselines
     lasting_since = since - timedelta(days=lasting.LOOKBACK_DAYS)
-    daily = _daily(conn, uid, WEARABLE_CODES, min(load_since, year_from, lasting_since), today, tz,
+    # the rule also reads codes this page doesn't draw (Apple's hrv_sdnn)
+    codes = (*WEARABLE_CODES, *(c for c in lasting.DEFAULTS.daily if c not in WEARABLE_CODES))
+    daily = _daily(conn, uid, codes, min(load_since, year_from, lasting_since), today, tz,
                    day_zone)
     wearables = []
     for code in WEARABLE_CODES:

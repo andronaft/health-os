@@ -13,9 +13,12 @@ const EN = {
   "not_enough": "Not checked: there are fewer than {min} days of values in the {days} days before, so there is no usual range to compare with yet.",
   "metric.resting_hr": "Resting heart rate",
   "metric.hrv": "HRV",
+  "metric.hrv_sdnn": "HRV (SDNN, Apple)",
   "metric.heart_rate": "Heart rate while still",
   "unit.resting_hr": "bpm",
   "unit.hrv": "ms",
+  "unit.hrv_sdnn": "ms",
+  "no_workouts": "No workouts are recorded here, so a ride, a row or a gym session without steps can't be told apart from sitting still and may show up in this list.",
   "unit.heart_rate": "bpm",
   "and": " and ",
   "period": "{first} – {last}",
@@ -32,7 +35,7 @@ const EN = {
   "context.beta_blocker": "{name}: a beta blocker, which lowers heart rate and can hide a rise",
   "area": "worth checking",
   "footnote": "How this is found: your usual range is the median and spread of the {baseline} days before; {days} in a row beyond it count (resting heart rate up by at least {rhr} bpm, HRV down by at least {hrv} ms). Heart rate counts when it is {above} bpm above your resting median for {minutes}+ minutes with no steps and no workout (Apple Health only). These thresholds are initial defaults, to be reviewed. {limits}",
-  "limits": "No ECG: wrist sensors only. Days and minutes when the watch was off are gaps, not normal days.",
+  "limits": "No ECG: wrist sensors only. Days and minutes when the watch was off are gaps, not normal days. Garmin gives daily values only (resting heart rate, HRV); the minutes rule needs Apple Health's raw heart rate and steps. Apple's HRV (SDNN) is compared only with itself, never with Garmin's.",
 };
 
 const UK = {
@@ -42,9 +45,12 @@ const UK = {
   "not_enough": "Не перевірено: за попередні {days} днів є менше ніж {min} днів зі значеннями, тож звичного діапазону для порівняння ще немає.",
   "metric.resting_hr": "Пульс спокою",
   "metric.hrv": "HRV",
+  "metric.hrv_sdnn": "HRV (SDNN, Apple)",
   "metric.heart_rate": "Пульс у спокої",
   "unit.resting_hr": "уд/хв",
   "unit.hrv": "мс",
+  "unit.hrv_sdnn": "мс",
+  "no_workouts": "Тренувань тут не записано, тож велосипед, веслування чи зал без кроків не відрізнити від сидіння, і вони можуть потрапити в цей список.",
   "unit.heart_rate": "уд/хв",
   "and": " і ",
   "period": "{first} – {last}",
@@ -65,7 +71,7 @@ const UK = {
   "context.beta_blocker": "{name}: бета-блокатор, він знижує пульс і може приховати підвищення",
   "area": "варто переглянути",
   "footnote": "Як це визначено: ваш звичний діапазон — медіана й розкид за {baseline} попередніх днів; рахуються {days} поспіль поза ним (пульс спокою вищий щонайменше на {rhr} уд/хв, HRV нижча щонайменше на {hrv} мс). Пульс рахується, коли він на {above} уд/хв вищий за медіану пульсу спокою {minutes}+ хвилин без кроків і без тренування (лише Apple Health). Ці пороги — початкові, їх ще треба переглянути. {limits}",
-  "limits": "Без ЕКГ: лише датчики на зап'ясті. Дні й хвилини, коли годинник був знятий, — це прогалини, а не звичайні дні.",
+  "limits": "Без ЕКГ: лише датчики на зап'ясті. Дні й хвилини, коли годинник був знятий, — це прогалини, а не звичайні дні. Garmin дає лише денні значення (пульс спокою, HRV); правилу хвилин потрібні сирі пульс і кроки з Apple Health. HRV від Apple (SDNN) порівнюється лише сама з собою, ніколи з Garmin.",
 };
 
 const ES = {
@@ -75,9 +81,12 @@ const ES = {
   "not_enough": "Sin comprobar: hay menos de {min} días con valores en los {days} días anteriores, así que aún no hay un rango habitual con el que comparar.",
   "metric.resting_hr": "Pulso en reposo",
   "metric.hrv": "VFC",
+  "metric.hrv_sdnn": "VFC (SDNN, Apple)",
   "metric.heart_rate": "Pulso estando quieto",
   "unit.resting_hr": "lpm",
   "unit.hrv": "ms",
+  "unit.hrv_sdnn": "ms",
+  "no_workouts": "Aquí no hay entrenamientos registrados, así que una salida en bici, remo o gimnasio sin pasos no se distingue de estar sentado y puede aparecer en esta lista.",
   "unit.heart_rate": "lpm",
   "and": " y ",
   "period": "{first} – {last}",
@@ -94,7 +103,7 @@ const ES = {
   "context.beta_blocker": "{name}: un betabloqueante, que baja el pulso y puede ocultar una subida",
   "area": "para revisar",
   "footnote": "Cómo se detecta: su rango habitual es la mediana y la dispersión de los {baseline} días anteriores; cuentan {days} seguidos fuera de él (pulso en reposo al menos {rhr} lpm más alto, VFC al menos {hrv} ms más baja). El pulso cuenta cuando está {above} lpm por encima de su mediana en reposo durante {minutes}+ minutos sin pasos ni entrenamiento (solo Apple Health). Estos umbrales son valores iniciales, pendientes de revisión. {limits}",
-  "limits": "Sin ECG: solo sensores de muñeca. Los días y minutos sin el reloj son huecos, no días normales.",
+  "limits": "Sin ECG: solo sensores de muñeca. Los días y minutos sin el reloj son huecos, no días normales. Garmin solo da valores diarios (pulso en reposo, VFC); la regla de minutos necesita el pulso y los pasos sin procesar de Apple Health. La VFC de Apple (SDNN) solo se compara consigo misma, nunca con la de Garmin.",
 };
 
 export const SUSTAINED_DICTIONARIES = { en: EN, uk: UK, es: ES };

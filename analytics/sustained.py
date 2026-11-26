@@ -147,18 +147,38 @@ def _steps_near(conn, uid, spans: list[tuple[datetime, datetime]],
     return [(ts, float(v)) for ts, v in rows]
 
 
+def _has_heart_rate(conn, uid, lo: datetime, hi: datetime) -> bool:
+    return bool(conn.execute(text(
+        """SELECT EXISTS (SELECT 1 FROM device_samples WHERE user_id = :u
+                            AND type_code = 'heart_rate' AND ts >= :lo AND ts < :hi)"""),
+        {"u": uid, "lo": lo, "hi": hi}).scalar())
+
+
+def workouts_recorded(conn, uid) -> bool:
+    """Whether any workout is recorded at all. Without one, the minutes rule can't tell a
+    step-free ride, row or gym session from sitting still, and must say so."""
+    return bool(conn.execute(text(
+        """SELECT EXISTS (SELECT 1 FROM physical_activities
+                          WHERE user_id = :u AND deleted_at IS NULL)"""), {"u": uid}).scalar())
+
+
 def intraday(conn, uid, since: date, until: date, tz: ZoneInfo, resting: dict[date, float],
-             work: list[dict], meds: list[dict], params: SustainedParams = DEFAULTS) -> list[dict]:
-    """The minutes rule on Apple Health raw samples between `since` and `until` (user's days)."""
+             work: list[dict], meds: list[dict],
+             params: SustainedParams = DEFAULTS) -> tuple[list[dict], str]:
+    """The minutes rule on Apple Health raw samples between `since` and `until` (user's days):
+    its episodes and whether it ran — "checked", "no_samples" (no raw heart rate in the
+    window: Garmin imports daily values only) or "no_baseline" (no resting heart rate history)."""
     days = [since + timedelta(days=i) for i in range((until - since).days + 1)]
+    lo, hi = _bounds(since, until, tz)
+    if not _has_heart_rate(conn, uid, lo, hi):
+        return [], "no_samples"
     medians = resting_medians(resting, days, params)
     if not medians:
-        return []
-    lo, hi = _bounds(since, until, tz)
+        return [], "no_baseline"
     lines = [medians[d] + params.hr_above_resting if d in medians else None for d in days]
     runs = _high_runs(conn, uid, lo, hi, tz, since, lines, params)
     if not runs:
-        return []
+        return [], "checked"
     # the step records near those runs only; each run is then checked on its own by the pure
     # rule, so two runs the database split are never joined again
     spans = [(run[0][0], run[-1][0]) for run in runs]
@@ -168,7 +188,7 @@ def intraday(conn, uid, since: date, until: date, tz: ZoneInfo, resting: dict[da
                                            tz=tz, params=params)]
     for e in episodes:
         e["context"] = context_for(e["day"], e["day"], ["heart_rate"], [], meds, tz, params)
-    return episodes
+    return episodes, "checked"
 
 
 def find(conn, uid, since: date, until: date, tz: ZoneInfo | None = None,
@@ -188,13 +208,21 @@ def find(conn, uid, since: date, until: date, tz: ZoneInfo | None = None,
     meds = beta_blockers(conn, uid, params)
     days = sustained_days(daily, since=since, workouts=work, medications=meds, tz=tz,
                           params=params)
-    minutes = intraday(conn, uid, since, until, tz, daily.get("resting_hr", {}), work, meds,
-                       params)
+    minutes, minutes_rule = intraday(conn, uid, since, until, tz, daily.get("resting_hr", {}),
+                                     work, meds, params)
+    recorded = workouts_recorded(conn, uid)
+    notes = []
+    if minutes_rule == "checked" and not recorded:
+        notes.append("No workouts are recorded, so a step-free ride, row or gym session can't "
+                     "be told apart from sitting still: it may show up as a minutes finding.")
     return {
         "from": since, "to": until, "tz": tz.key,
         "findings": sorted(days, key=lambda f: f["last_day"], reverse=True)
         + sorted(minutes, key=lambda e: e["start"], reverse=True),
         "days_with_values": {code: len(v) for code, v in daily.items()},
+        "minutes_rule": minutes_rule,
+        "workouts_recorded": recorded,
+        "notes": notes,
         "params": params.as_dict(),
         "limits": limits_text(params),
         "wording": "Worth checking, not a diagnosis: a cold, short sleep, alcohol, travel, heat "

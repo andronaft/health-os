@@ -1134,7 +1134,9 @@ test("the heatmap is a calendar of the year, coloured from its own lowest to hig
 });
 
 // ---- sustained deviations on the Vitals page (#75) ------------------------------------------------
-import { findingView, shadedRuns, sustainedEmpty, sustainedFootnote, sustainedState, withShading } from "../web/static/pages/sustained-model.js";
+import {
+  findingView, shadedRuns, sustainedEmpty, sustainedFootnote, sustainedNotes, sustainedState, withShading,
+} from "../web/static/pages/sustained-model.js";
 import { SUSTAINED_DICTIONARIES, SUSTAINED_LANGS, sustainedTranslator } from "../web/static/pages/sustained-strings.js";
 
 const SUSTAINED_PARAMS = {
@@ -1216,6 +1218,15 @@ test("every sustained dictionary has every word and plural form, and none of the
       assert.doesNotMatch(text.toLowerCase(), /everything is normal|all normal|todo normal|все в нормі|nothing to worry|danger|urgent|alarm|тривог|небезпе|peligro|urgente/);
     }
   }
+});
+
+test("without recorded workouts the list says step-free exercise may show up in it", () => {
+  const base = { findings: [], params: SUSTAINED_PARAMS };
+  assert.match(sustainedNotes({ ...base, minutes_rule: "checked", workouts_recorded: false })[0], /No workouts are recorded here/);
+  assert.match(sustainedNotes({ ...base, minutes_rule: "checked", workouts_recorded: false }, "uk")[0], /Тренувань тут не записано/);
+  assert.deepEqual(sustainedNotes({ ...base, minutes_rule: "checked", workouts_recorded: true }), []);
+  assert.deepEqual(sustainedNotes({ ...base, minutes_rule: "no_samples", workouts_recorded: false }), []); // Garmin only: no minutes rule
+  assert.equal(findingView({ ...PAIRED, metrics: [{ ...PAIRED.metrics[1], code: "hrv_sdnn" }], together_days: null }).title, "HRV (SDNN, Apple)");
 });
 
 test("the runs are shaded on their own panels, the last day included", () => {
