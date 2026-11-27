@@ -14,6 +14,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   window, a gentler loading state (none with reduced motion). The menu is grouped (Today /
   Results / Record / Tools) and marks the current page; on a phone it folds into a one-line header
   that names the page. Charts share one ECharts theme drawn from the same tokens in both themes.
+- Browser UI: paper and ink. Working screens are warm paper written in ink, the dark theme a warm
+  "night archive"; there is no accent colour (links, focus and the current page are ink, replacing
+  the teal above), no green for "in range", no card shadows, and chart series are ink and greys.
+  Red is kept for critical values alone: the allergy box is an ink frame, the NFC "does not fit"
+  is ink with its ✕ on a grey meter, the privacy and "worth checking" blocks are neutral, and the
+  wallet card's red cross is now a black band with the words. The visit sheet stays white in the
+  dark theme. A mark ("pencil to ink") in the menu and, for the first time, a favicon.
 
 ### Added
 - Emergency packet (#74): `core/emergency.py` builds, from approved data only and with no model,
