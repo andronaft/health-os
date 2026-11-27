@@ -52,7 +52,6 @@
      would be a fifth meaning for a colour (blue already says "low" on a value) */
   --accent: var(--fg);
   --accent-soft: var(--surface-2);
-  --on-accent: var(--bg);
   --focus: var(--fg);
   --ok: var(--fg);
   /* a load or connection problem: ink, not red. Red is kept for critical values alone; the icon
@@ -1365,6 +1364,12 @@ details > summary:hover {
   :root,
   :root[data-theme] {
     color-scheme: light;
+  }
+
+  /* paper is the paper: the screen's warm tint would print as a beige page with background
+     graphics on */
+  body {
+    background: #fff;
   }
 
   .sidebar,
