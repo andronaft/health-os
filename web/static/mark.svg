@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>health-os</title>
+  <!-- The mark, "pencil to ink": a pencil dash (what a machine read) runs into a solid ink line
+       ending in a dot (what you confirmed). Paper on ink, so it reads on a light or a dark tab
+       bar; at 16 px one dash is enough, two blur together. -->
+  <rect width="32" height="32" rx="7" fill="#1e1b16"/>
+  <line x1="5" y1="16" x2="10" y2="16" stroke="#f5f2ea" stroke-width="3.4" stroke-opacity="0.62"/>
+  <line x1="14" y1="16" x2="23" y2="16" stroke="#f5f2ea" stroke-width="3.4"/>
+  <circle cx="23.5" cy="16" r="5" fill="#f5f2ea"/>
+</svg>

@@ -102,7 +102,7 @@ function nfc(packet) {
     size.textContent = t("emergency.nfc.size", { size: budget.size, text: budget.textBytes, chars: budget.chars });
     tags.replaceChildren(...budget.tags.map((tag) => el("li", { "data-fits": String(tag.fits) },
       el("span", { class: "emergency-tag-name" }, t("emergency.nfc.tag", { tag: tag.tag, capacity: tag.capacity })),
-      // green, amber when nearly full, red only when over: a full tag that fits stays under `high`
+      // how full the tag is (styles.css draws it in ink, not traffic lights); a full tag that fits stays under `high`
       el("meter", {
         min: "0", max: String(tag.capacity), optimum: "0", low: String(tag.capacity * 0.9), high: String(tag.capacity - 0.5),
         value: String(tag.fits ? Math.min(budget.size, tag.capacity - 0.5) : tag.capacity), "aria-hidden": "true",
@@ -135,7 +135,7 @@ function cardSide(packet, fields, heading) {
 
 function walletCard(packet) {
   const sides = cardSides(packet.lock_screen.fields);
-  const front = cardSide(packet, sides.front, el("p", { class: "wallet-title" }, el("span", { "aria-hidden": "true" }, "✚ "), packet.title));
+  const front = cardSide(packet, sides.front, el("p", { class: "wallet-title" }, packet.title));
   const back = cardSide(packet, sides.back, null);
   const card = el("div", { class: "wallet-card", lang: packet.lang }, front, back);
   // a side that is too full grows (styles.css: never clipped); the warning is on screen and on paper

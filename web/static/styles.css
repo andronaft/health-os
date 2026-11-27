@@ -29,52 +29,66 @@
   --space-6: 2rem;
   --space-7: 3rem;
 
+  /* corners of paper, not of an app: a sheet is cut square, a box is barely rounded */
   --radius-sm: 0.25rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.375rem;
   --radius-pill: 999px;
 
-  /* surfaces, from the page up: bg < surface (a card) < raised (a menu over the page) */
-  --bg: light-dark(#f5f6f8, #141518);
-  --surface: light-dark(#ffffff, #1c1d21);
-  --surface-2: light-dark(#f0f2f5, #24262b);
-  --fg: light-dark(#1b1e23, #ebedf0);
-  --muted: light-dark(#575e69, #a4a9b2);
-  --border: light-dark(#e1e4e9, #33363c);
+  /* Paper and ink (docs: design direction "a quiet document with seals"). Working screens are warm
+     paper written in ink; there is no accent colour. Colour is news: it appears only where a value
+     is outside its range, and red only where it is critical. The dark theme is a night archive:
+     warm charcoal, not blue-black.
+     surfaces, from the page up: bg (paper) < surface (a sheet on it) < raised (a menu over it) */
+  --bg: light-dark(#f5f2ea, #161412);
+  --surface: light-dark(#fffdf8, #1e1b18);
+  --surface-2: light-dark(#eee9de, #272320);
+  --fg: light-dark(#1e1b16, #ece6da);
+  --muted: light-dark(#5e574c, #a89f90);
+  --border: light-dark(#ded7c8, #36312b);
   /* what a control is drawn with: a form field's edge has to reach 3:1 (WCAG 1.4.11) */
-  --control-border: light-dark(#858b95, #737882);
-  /* links, focus, the current page. Teal, not blue: blue says "low" on a value */
-  --accent: light-dark(#0b6b73, #5cc8cf);
-  --accent-soft: light-dark(#e3f1f2, #17393c);
-  --on-accent: light-dark(#ffffff, #0c1a1b);
-  --focus: light-dark(#0b6b73, #7fdde3);
-  --ok: light-dark(#1a7f37, #4ac26b);
-  /* a load or connection problem: slate, not red. Red is kept for critical values alone; the icon
+  --control-border: light-dark(#8a8275, #7a7266);
+  /* links, focus and the current page are ink: underlined, ringed, barred. A tint of their own
+     would be a fifth meaning for a colour (blue already says "low" on a value) */
+  --accent: var(--fg);
+  --accent-soft: var(--surface-2);
+  --focus: var(--fg);
+  --ok: var(--fg);
+  /* a load or connection problem: ink, not red. Red is kept for critical values alone; the icon
      and the words say it is an error */
-  --error: light-dark(#454c58, #c3c8d0);
+  --error: light-dark(#3f3a32, #cfc7b8);
 
-  /* value status; every pill also has its word and icon */
-  --low: light-dark(#1f5fbf, #7db2ff);
-  --in-range: light-dark(#16723a, #4ac26b);
-  /* high is not critical: red is kept for critical alone, high is a burnt orange */
-  --high: light-dark(#9a3b06, #f5a35c);
+  /* value status; every pill also has its word and icon. In range is not painted: green would
+     draw "everything is fine", which the system never says */
+  --low: light-dark(#1f5fbf, #86b6ff);
+  --in-range: var(--muted);
+  /* high is not critical: red is kept for critical alone, high is a burnt orange. High and critical
+     stay apart under deuteranopia only by their shape and word, never by the hue */
+  --high: light-dark(#9a3b06, #f2a25e);
   --critical: light-dark(#b42318, #ff7b72);
   --on-critical: light-dark(#ffffff, #1c0605);
-  --pending: light-dark(#575e69, #a4a9b2);
+  /* pencil: what a machine read and nobody has confirmed; the one cool grey */
+  --pending: light-dark(#5f646c, #a3a8b0);
+  /* a lab form's range drawn under a value: a grey band, never a colour */
+  --band: light-dark(#d9d2c3, #4a443c);
 
-  /* elevation: a hairline and a soft shadow on light; on dark the surface step does it */
-  --shadow-1: 0 1px 2px light-dark(rgb(16 24 40 / 0.06), rgb(0 0 0 / 0.3));
-  --shadow-2: 0 8px 24px light-dark(rgb(16 24 40 / 0.12), rgb(0 0 0 / 0.5)), var(--shadow-1);
+  /* elevation: paper lies flat, so a card has no shadow (a hairline does it). A transparent zero
+     shadow rather than none, so it still works inside a list of shadows. Only what is raised over
+     the page (a drawer, the skip link) casts one */
+  --shadow-1: 0 0 0 transparent;
+  --shadow-2: 0 8px 24px light-dark(rgb(30 27 22 / 0.14), rgb(0 0 0 / 0.5));
 
-  /* chart series, in this order: the neighbours stay apart under colour blindness. Slots 3 and 4
-     are under 3:1 on the light background, so a chart using them needs direct labels or a table. */
-  --chart-1: light-dark(#2a78d6, #3987e5);
-  --chart-2: light-dark(#eb6834, #d95926);
-  --chart-3: light-dark(#1baf7a, #199e70);
-  --chart-4: light-dark(#eda100, #c98500);
+  /* chart series: ink and greys, each a step of lightness from its neighbour. Lines tell series
+     apart by their shape and the label on the line, not by hue; colour on a chart is kept for a
+     point outside its range. Slot 3 is under 3:1 on paper, so a chart using it needs direct
+     labels or a table. */
+  --chart-1: var(--fg);
+  --chart-2: light-dark(#8a8275, #8f877a);
+  --chart-3: light-dark(#b5ac9c, #5e574d);
+  --chart-4: light-dark(#5e574c, #b8af9f);
   /* a chart's own lines: grid fainter than a table's rules, axes as strong as them */
-  --chart-grid: light-dark(#eceef2, #2a2c31);
-  --chart-axis: light-dark(#c9cdd4, #474a51);
+  --chart-grid: light-dark(#ebe6db, #2a2622);
+  --chart-axis: light-dark(#cbc3b3, #4a443c);
 
   --sidebar-width: 14rem;
   --content-width: 76rem;
@@ -274,17 +288,25 @@ code {
   text-decoration: none;
 }
 
-/* the mark: a plus in a rounded square, drawn, not an image (the CSP allows none from outside) */
-.brand::before {
-  content: "";
+/* the mark, "pencil to ink": two pencil dashes (what a machine read) run into a solid ink line
+   ending in a dot (what you confirmed). Inline in index.html so it takes the theme's colours;
+   mark.svg is the same drawing for the browser tab */
+.brand-mark {
   flex: none;
-  width: 1.5rem;
-  height: 1.5rem;
-  border-radius: var(--radius-md);
-  background:
-    linear-gradient(var(--on-accent), var(--on-accent)) center / 0.75rem 0.1875rem no-repeat,
-    linear-gradient(var(--on-accent), var(--on-accent)) center / 0.1875rem 0.75rem no-repeat,
-    var(--accent);
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+.brand-mark .mark-pencil {
+  stroke: var(--pending);
+}
+
+.brand-mark .mark-ink {
+  stroke: var(--fg);
+}
+
+.brand-mark .mark-dot {
+  fill: var(--fg);
 }
 
 nav ul {
@@ -329,7 +351,7 @@ nav a:hover {
   font-size: var(--text-xs);
 }
 
-/* the bar, the tint and the weight mark it, not only the colour */
+/* an ink bar and the weight mark it, with a faint paper tint: no colour of its own */
 nav a[aria-current="page"] {
   background: var(--accent-soft);
   color: var(--fg);
@@ -341,8 +363,8 @@ nav a[aria-current="page"]::before {
   position: absolute;
   inset: 0.375rem auto 0.375rem 0;
   width: 3px;
-  border-radius: var(--radius-pill);
-  background: var(--accent);
+  border-radius: 1px;
+  background: var(--fg);
 }
 
 /* the phone header's menu button; on a wide window the menu is always open */
@@ -574,7 +596,8 @@ footer strong {
   min-height: 1.375rem;
   padding: 0 0.5rem;
   border: 1px solid var(--pill);
-  border-radius: var(--radius-pill);
+  /* a small label like a stamp, not a sweet */
+  border-radius: var(--radius-sm);
   color: var(--pill);
   font-size: var(--text-xs);
   font-weight: 500;
@@ -607,8 +630,10 @@ footer strong {
   font-weight: 700;
 }
 
+/* in range: the word in grey, no colour and no fill */
 .pill[data-status="normal"] {
   --pill: var(--in-range);
+  border-color: var(--border);
 }
 
 .pill[data-status="pending"] {
@@ -1236,8 +1261,9 @@ details > summary:hover {
   font-weight: 700;
 }
 
+/* in range is not painted */
 .matrix-cell[data-status="normal"] {
-  background: color-mix(in srgb, var(--in-range) 7%, var(--surface));
+  background: var(--surface);
 }
 
 .matrix-empty {
@@ -1338,6 +1364,12 @@ details > summary:hover {
   :root,
   :root[data-theme] {
     color-scheme: light;
+  }
+
+  /* paper is the paper: the screen's warm tint would print as a beige page with background
+     graphics on */
+  body {
+    background: #fff;
   }
 
   .sidebar,
@@ -1725,12 +1757,13 @@ details > summary:hover {
   flex: none;
 }
 
-/* allergies: critical information, at the top and boxed, never scrolled to */
+/* allergies: critical information, at the top and boxed, never scrolled to. An ink frame and its
+   "!", not red: red is kept for a critical value, and an allergy is not news */
 .rec-allergies {
   padding: 0.75rem 1.25rem;
-  border: 2px solid var(--critical);
+  border: 2px solid var(--fg);
   border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--critical) 8%, var(--surface));
+  background: var(--surface);
 }
 
 .rec-allergies h2 {
@@ -1805,10 +1838,12 @@ details > summary:hover {
   line-height: 1.6;
 }
 
+/* not confirmed: pencil and a dashed edge, the one meaning a dashed line has */
 .rec-tag-warn {
   margin-inline-start: 0.5rem;
-  border-color: var(--high);
-  color: var(--high);
+  border-style: dashed;
+  border-color: var(--pending);
+  color: var(--pending);
 }
 
 .rec-note {
@@ -2031,12 +2066,14 @@ details > summary:hover {
   background: color-mix(in srgb, var(--border) 60%, transparent);
 }
 
+/* the lab form's range: a grey band edged where the form puts its limits; only the mark on it may
+   have a colour, and only outside the band */
 .range-bar-band {
   position: absolute;
   top: 0;
   bottom: 0;
-  background: color-mix(in srgb, var(--in-range) 25%, transparent);
-  border-inline: 2px solid var(--in-range);
+  background: var(--band);
+  border-inline: 2px solid var(--control-border);
 }
 
 .range-bar-band[data-open-low] {
@@ -2123,7 +2160,7 @@ details > summary:hover {
 }
 
 .value-link:hover {
-  color: var(--accent);
+  text-decoration-style: solid;
 }
 
 /* the drawer: a side panel; on a phone a bottom sheet */
@@ -2298,13 +2335,17 @@ details > summary:hover {
   font-weight: 600;
 }
 
+/* the sheet that goes to the doctor is white paper in either theme: what is on screen is what
+   prints. color-scheme picks the light value of every token inside it */
 .report-sheet {
   max-width: 52rem;
   padding: 1.5rem 1.75rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-1);
+  border-radius: 0;
+  color-scheme: light;
+  background: #fff;
+  color: var(--fg);
+  box-shadow: var(--shadow-2);
   font-size: 0.9rem;
   line-height: 1.4;
 }
@@ -2382,11 +2423,12 @@ details > summary:hover {
   margin-bottom: 0.75rem;
 }
 
+/* an ink frame and ⚠: it must survive a black-and-white copy, and red is for critical values */
 .report-allergies {
   margin-bottom: 0.75rem;
   padding: 0.5rem 0.75rem;
-  border: 2px solid var(--critical);
-  border-radius: 6px;
+  border: 2px solid var(--fg);
+  border-radius: 0;
 }
 
 .report-allergies[data-none] {
@@ -2396,7 +2438,7 @@ details > summary:hover {
 
 .report-alert-icon {
   margin-inline-end: 0.35rem;
-  color: var(--critical);
+  color: var(--fg);
 }
 
 .report-columns {
@@ -2607,10 +2649,10 @@ details > summary:hover {
 }
 
 /* Sustained deviations on the Vitals page (#75): a short "worth checking" list above the watch's
-   charts. Amber, like the shaded days on the charts: worth a look, not an alarm (red is for
-   critical values alone). */
+   charts. A grey rule, like the shaded days on the charts: worth a look, not an alarm and not
+   news about a lab value, so no colour at all. */
 .sustained {
-  border-left: 4px solid var(--chart-4);
+  border-left: 4px solid var(--control-border);
 }
 
 .sustained h3 {
@@ -2951,11 +2993,13 @@ body.privacy-blur :is(main .view, .obs-body) :is(p, li, td, pre, textarea, .char
   margin: 0;
 }
 
+/* a note to read before showing anything: ink, not the orange that says "high" on a value */
 .emergency-privacy {
   padding: 0.75rem 1rem;
-  border: 2px solid var(--high);
-  border-radius: 0.5rem;
-  background: color-mix(in srgb, var(--high) 8%, var(--surface));
+  border: 1px solid var(--control-border);
+  border-inline-start: 4px solid var(--fg);
+  border-radius: var(--radius-md);
+  background: var(--surface);
 }
 
 .emergency-privacy p,
@@ -3040,9 +3084,10 @@ body.privacy-blur :is(main .view, .obs-body) :is(p, li, td, pre, textarea, .char
   margin-inline-start: 0;
 }
 
+/* a note about the text you typed, not about a value: ink, bold */
 .emergency-edited {
-  color: var(--high);
-  font-weight: 600;
+  color: var(--fg);
+  font-weight: 650;
 }
 
 .emergency-nfc-size {
@@ -3064,23 +3109,48 @@ body.privacy-blur :is(main .view, .obs-body) :is(p, li, td, pre, textarea, .char
   gap: 0.75rem;
 }
 
+/* how full the tag is: an ink bar on a grey track, never traffic lights. Too long for a tag is a
+   fact about the text, not a critical value: the ✕ and the words say it */
 .emergency-tags meter {
   width: 100%;
+  height: 0.625rem;
+  appearance: none;
+  border: 1px solid var(--control-border);
+  border-radius: 1px;
+  background: var(--band);
+}
+
+.emergency-tags meter::-webkit-meter-bar {
+  border: 0;
+  border-radius: 0;
+  background: var(--band);
+}
+
+.emergency-tags meter::-webkit-meter-optimum-value,
+.emergency-tags meter::-webkit-meter-suboptimum-value,
+.emergency-tags meter::-webkit-meter-even-less-good-value {
+  border-radius: 0;
+  background: var(--fg);
+}
+
+.emergency-tags meter::-moz-meter-bar {
+  border-radius: 0;
+  background: var(--fg);
 }
 
 .emergency-tags li[data-fits="true"] .emergency-tag-verdict {
-  color: var(--in-range);
+  color: var(--muted);
 }
 
 .emergency-tags li[data-fits="false"] .emergency-tag-verdict {
-  color: var(--critical);
-  font-weight: 600;
+  color: var(--fg);
+  font-weight: 650;
 }
 
 .emergency-warning {
   padding: 0.5rem 0.75rem;
-  border-inline-start: 4px solid var(--high);
-  background: color-mix(in srgb, var(--high) 8%, var(--surface));
+  border-inline-start: 4px solid var(--fg);
+  background: var(--surface-2);
 }
 
 .emergency-print {
@@ -3127,20 +3197,25 @@ body.privacy-blur :is(main .view, .obs-body) :is(p, li, td, pre, textarea, .char
 
 .wallet-overflow-print {
   margin: 1mm 0 0;
-  color: #b42318;
+  color: #1d1d1f;
   font-size: 7pt;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .wallet-side + .wallet-side {
   border-inline-start: 1px dashed #8a8a85;
 }
 
+/* a black band with the words, no cross: the red cross is a protected emblem, and the words are
+   what is read. Ink on the paper's white survives any copier */
 .wallet-title {
-  margin: 0 0 1.5mm;
-  color: #b42318;
+  margin: -3mm -3.5mm 1.5mm;
+  padding: 1.2mm 3.5mm;
+  background: #1d1d1f;
+  color: #fff;
   font-size: 8pt;
   font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .wallet-field {
